@@ -177,6 +177,8 @@ def LinalgTiling : FunctionPass<"linalg-tile"> {
   let options = [
     ListOption<"tileSizes", "tile-sizes", "int64_t", "Tile sizes",
                "llvm::cl::ZeroOrMore, llvm::cl::MiscFlags::CommaSeparated">,
+    ListOption<"peeledLoops", "peeled-loops", "int64_t", "Peeled loops",
+               "llvm::cl::ZeroOrMore, llvm::cl::MiscFlags::CommaSeparated">,
     Option<"loopType", "loop-type", "std::string", /*default=*/"\"for\"",
            "Specify the type of loops to generate: for, parallel or "
            "tiled_loop">,

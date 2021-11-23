@@ -518,8 +518,10 @@ namespace {
 struct LinalgTilingPass : public LinalgTilingBase<LinalgTilingPass> {
   LinalgTilingPass() = default;
   LinalgTilingPass(ArrayRef<int64_t> tileSizes, LinalgTilingLoopType loopType,
-                   ArrayRef<StringRef> distributionTypes) {
+                   ArrayRef<StringRef> distributionTypes,
+                   ArrayRef<int64_t> peeledLoops) {
     this->tileSizes = tileSizes;
+    this->peeledLoops = peeledLoops;
     this->loopType = "";
     this->loopTypeEnum = loopType;
     this->distributionTypes = llvm::to_vector<2>(llvm::map_range(
@@ -540,7 +542,8 @@ struct LinalgTilingPass : public LinalgTilingBase<LinalgTilingPass> {
     auto options = LinalgTilingOptions()
                        .setTileSizes(tileSizes)
                        .setLoopType(type)
-                       .setDistributionTypes(distTypes);
+                       .setDistributionTypes(distTypes)
+                       .setPeeledLoops(peeledLoops);
     MLIRContext *ctx = funcOp.getContext();
     RewritePatternSet patterns(ctx);
     insertTilingPatterns(patterns, options);
@@ -563,10 +566,9 @@ struct LinalgTilingPass : public LinalgTilingBase<LinalgTilingPass> {
 
 } // namespace
 
-std::unique_ptr<OperationPass<FuncOp>>
-mlir::createLinalgTilingPass(ArrayRef<int64_t> tileSizes,
-                             linalg::LinalgTilingLoopType loopType,
-                             ArrayRef<StringRef> distributionTypes) {
+std::unique_ptr<OperationPass<FuncOp>> mlir::createLinalgTilingPass(
+    ArrayRef<int64_t> tileSizes, linalg::LinalgTilingLoopType loopType,
+    ArrayRef<StringRef> distributionTypes, ArrayRef<int64_t> peeledLoops) {
   return std::make_unique<LinalgTilingPass>(tileSizes, loopType,
-                                            distributionTypes);
+                                            distributionTypes, peeledLoops);
 }

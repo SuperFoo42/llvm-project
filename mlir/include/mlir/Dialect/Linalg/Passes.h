@@ -29,7 +29,7 @@ std::unique_ptr<Pass> createFoldReshapeOpsByLinearizationPass();
 std::unique_ptr<OperationPass<FuncOp>> createLinalgTilingPass(
     ArrayRef<int64_t> tileSizes = {},
     linalg::LinalgTilingLoopType loopType = linalg::LinalgTilingLoopType::Loops,
-    ArrayRef<StringRef> distributionTypes = {});
+    ArrayRef<StringRef> distributionTypes = {}, ArrayRef<int64_t> peeledLoops = {});
 
 std::unique_ptr<OperationPass<FuncOp>>
 createLinalgPromotionPass(bool dynamicBuffers, bool useAlloca);
