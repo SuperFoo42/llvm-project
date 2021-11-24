@@ -306,6 +306,8 @@ static SmallVector<Value, 4> peelLoop(RewriterBase &rewriter,
 static void peelLoops(RewriterBase &rewriter, TiledLinalgOp &res,
                       const LinalgTilingOptions &options) {
   for (int64_t loop : options.peeledLoops) {
+    if (res.loops.size() == 0)
+      continue;
     assert(loop < static_cast<int64_t>(res.loops.size()) &&
            "requested peeling of non-existing loop");
     SmallVector<Value, 4> loopResults;
