@@ -666,6 +666,29 @@ static bool isNoWrap(PredicatedScalarEvolution &PSE,
   return false;
 }
 
+static void visitPointers(Value *StartPtr, const Loop &InnermostLoop,
+                          function_ref<void(Value *)> AddPointer) {
+  SmallPtrSet<Value *, 8> Visited;
+  SmallVector<Value *> WorkList;
+  WorkList.push_back(StartPtr);
+
+  while (!WorkList.empty()) {
+    Value *Ptr = WorkList.pop_back_val();
+    if (!Visited.insert(Ptr).second)
+      continue;
+    auto *PN = dyn_cast<PHINode>(Ptr);
+    // SCEV does not look through non-header PHIs inside the loop. Such phis
+    // can be analyzed by adding separate accesses for each incoming pointer
+    // value.
+    if (PN && InnermostLoop.contains(PN->getParent()) &&
+        PN->getParent() != InnermostLoop.getHeader()) {
+      for (const Use &Inc : PN->incoming_values())
+        WorkList.push_back(Inc);
+    } else
+      AddPointer(Ptr);
+  }
+}
+
 bool AccessAnalysis::createCheckForAccess(RuntimePointerChecking &RtCheck,
                                           MemAccessInfo Access,
                                           const ValueToValueMap &StridesMap,
@@ -1034,6 +1057,12 @@ int64_t llvm::getPtrStride(PredicatedScalarEvolution &PSE, Type *AccessTy,
   assert(Ty->isPointerTy() && "Unexpected non-ptr");
   assert(!AccessTy->isAggregateType() && "Bad stride - Not a pointer to a scalar type");
 
+  if (isa<ScalableVectorType>(AccessTy)) {
+    LLVM_DEBUG(dbgs() << "LAA: Bad stride - Scalable object: " << *AccessTy
+                      << "\n");
+    return 0;
+  }
+
   const SCEV *PtrScev = replaceSymbolicStrideSCEV(PSE, StridesMap, Ptr);
 
   const SCEVAddRecExpr *AR = dyn_cast<SCEVAddRecExpr>(PtrScev);
@@ -1094,7 +1123,8 @@ int64_t llvm::getPtrStride(PredicatedScalarEvolution &PSE, Type *AccessTy,
   }
 
   auto &DL = Lp->getHeader()->getModule()->getDataLayout();
-  int64_t Size = DL.getTypeAllocSize(AccessTy);
+  TypeSize AllocSize = DL.getTypeAllocSize(AccessTy);
+  int64_t Size = AllocSize.getFixedSize();
   const APInt &APStepVal = C->getAPInt();
 
   // Huge step value - give up.
@@ -1254,29 +1284,6 @@ bool llvm::isConsecutiveAccess(Value *A, Value *B, const DataLayout &DL,
   Optional<int> Diff = getPointersDiff(ElemTyA, PtrA, ElemTyB, PtrB, DL, SE,
                                        /*StrictCheck=*/true, CheckType);
   return Diff && *Diff == 1;
-}
-
-static void visitPointers(Value *StartPtr, const Loop &InnermostLoop,
-                          function_ref<void(Value *)> AddPointer) {
-  SmallPtrSet<Value *, 8> Visited;
-  SmallVector<Value *> WorkList;
-  WorkList.push_back(StartPtr);
-
-  while (!WorkList.empty()) {
-    Value *Ptr = WorkList.pop_back_val();
-    if (!Visited.insert(Ptr).second)
-      continue;
-    auto *PN = dyn_cast<PHINode>(Ptr);
-    // SCEV does not look through non-header PHIs inside the loop. Such phis
-    // can be analyzed by adding separate accesses for each incoming pointer
-    // value.
-    if (PN && InnermostLoop.contains(PN->getParent()) &&
-        PN->getParent() != InnermostLoop.getHeader()) {
-      for (const Use &Inc : PN->incoming_values())
-        WorkList.push_back(Inc);
-    } else
-      AddPointer(Ptr);
-  }
 }
 
 void MemoryDepChecker::addAccess(StoreInst *SI) {
