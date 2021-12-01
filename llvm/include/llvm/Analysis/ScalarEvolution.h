@@ -1492,6 +1492,11 @@ private:
   DenseMap<const SCEV *, SmallVector<std::pair<const Loop *, const SCEV *>, 2>>
       ValuesAtScopes;
 
+  /// Reverse map for invalidation purposes: Stores of which SCEV and which
+  /// loop this is the value-at-scope of.
+  DenseMap<const SCEV *, SmallVector<std::pair<const Loop *, const SCEV *>, 2>>
+      ValuesAtScopesUsers;
+
   /// Memoized computeLoopDisposition results.
   DenseMap<const SCEV *,
            SmallVector<PointerIntPair<const Loop *, 2, LoopDisposition>, 2>>
@@ -1615,11 +1620,6 @@ private:
   /// Implementation code for getSCEVAtScope; called at most once for each
   /// SCEV+Loop pair.
   const SCEV *computeSCEVAtScope(const SCEV *S, const Loop *L);
-
-  /// This looks up computed SCEV values for all instructions that depend on
-  /// the given instruction and removes them from the ValueExprMap map if they
-  /// reference SymName. This is used during PHI resolution.
-  void forgetSymbolicName(Instruction *I, const SCEV *SymName);
 
   /// Return the BackedgeTakenInfo for the given loop, lazily computing new
   /// values if the loop hasn't been analyzed yet. The returned result is
@@ -1922,6 +1922,9 @@ private:
 
   /// Erase Value from ValueExprMap and ExprValueMap.
   void eraseValueFromMap(Value *V);
+
+  /// Insert V to S mapping into ValueExprMap and ExprValueMap.
+  void insertValueToMap(Value *V, const SCEV *S);
 
   /// Return false iff given SCEV contains a SCEVUnknown with NULL value-
   /// pointer.
