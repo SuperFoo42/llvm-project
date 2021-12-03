@@ -189,8 +189,8 @@ struct ExtractSliceOpInterface
     if (!inplace) {
       // Do not copy if the copied data is never read.
       if (isValueRead(extractSliceOp.result()))
-        state.allocationFns.memCpyFn(b, extractSliceOp.getLoc(), subView,
-                                     alloc);
+        state.options.allocationFns->memCpyFn(b, extractSliceOp.getLoc(),
+                                              subView, alloc);
       subView = alloc;
     }
 
@@ -227,6 +227,50 @@ struct ExtractOpInterface
     Value l = b.create<memref::LoadOp>(loc, srcMemref, extractOp.indices());
     extractOp.replaceAllUsesWith(l);
     return success();
+  }
+};
+
+struct InsertOpInterface
+    : public BufferizableOpInterface::ExternalModel<InsertOpInterface,
+                                                    tensor::InsertOp> {
+  bool bufferizesToMemoryRead(Operation *op, OpOperand &opOperand) const {
+    return true;
+  }
+
+  bool bufferizesToMemoryWrite(Operation *op, OpOperand &opOperand) const {
+    return true;
+  }
+
+  OpResult getAliasingOpResult(Operation *op, OpOperand &opOperand) const {
+    assert(&opOperand == &op->getOpOperand(1) /*dest*/ &&
+           "expected dest OpOperand");
+    return op->getOpResult(0);
+  }
+
+  SmallVector<OpOperand *> getAliasingOpOperand(Operation *op,
+                                                OpResult opResult) const {
+    return {&op->getOpOperand(1) /*dest*/};
+  }
+
+  LogicalResult bufferize(Operation *op, OpBuilder &b,
+                          BufferizationState &state) const {
+    auto insertOp = cast<tensor::InsertOp>(op);
+
+    // Take a guard before anything else.
+    OpBuilder::InsertionGuard g(b);
+    b.setInsertionPoint(insertOp);
+
+    Location loc = insertOp.getLoc();
+    Value destMemref = getResultBuffer(b, insertOp->getOpResult(0), state);
+    b.create<memref::StoreOp>(loc, insertOp.scalar(), destMemref,
+                              insertOp.indices());
+    state.mapBuffer(insertOp, destMemref);
+    state.aliasInfo.insertNewBufferAlias(insertOp, destMemref);
+    return success();
+  }
+
+  BufferRelation bufferRelation(Operation *op, OpOperand &opOperand) const {
+    return BufferRelation::Equivalent;
   }
 };
 
@@ -420,8 +464,8 @@ struct InsertSliceOpInterface
       state.aliasInfo.insertNewBufferAlias(subView, dstMemref);
       // Copy tensor.
       Value srcMemref = state.lookupBuffer(insertSliceOp.source());
-      state.allocationFns.memCpyFn(b, insertSliceOp.getLoc(), srcMemref,
-                                   subView);
+      state.options.allocationFns->memCpyFn(b, insertSliceOp.getLoc(),
+                                            srcMemref, subView);
     }
 
     state.mapBuffer(insertSliceOp.result(), dstMemref);
@@ -459,6 +503,7 @@ void mlir::linalg::comprehensive_bufferize::tensor_ext::
   registry.addOpInterface<tensor::ExtractSliceOp,
                           tensor_ext::ExtractSliceOpInterface>();
   registry.addOpInterface<tensor::ExtractOp, tensor_ext::ExtractOpInterface>();
+  registry.addOpInterface<tensor::InsertOp, tensor_ext::InsertOpInterface>();
   registry.addOpInterface<tensor::InsertSliceOp,
                           tensor_ext::InsertSliceOpInterface>();
 }

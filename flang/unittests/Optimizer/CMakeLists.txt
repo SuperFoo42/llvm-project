@@ -14,6 +14,8 @@ add_flang_unittest(FlangOptimizerTests
   Builder/DoLoopHelperTest.cpp
   Builder/FIRBuilderTest.cpp
   Builder/Runtime/AssignTest.cpp
+  Builder/Runtime/NumericTest.cpp
+  Builder/Runtime/ReductionTest.cpp
   Builder/Runtime/TransformationalTest.cpp
   FIRContextTest.cpp
   InternalNamesTest.cpp
