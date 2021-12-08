@@ -561,7 +561,7 @@ void GenerateLoopNest<AffineForOp>::doit(
     OpBuilder &b, Location loc, ArrayRef<Range> loopRanges, LinalgOp linalgOp,
     ArrayRef<Attribute> iteratorTypes,
     function_ref<scf::ValueVector(OpBuilder &, Location, ValueRange,
-                                  ValueRange)>
+                                  llvm::SmallDenseMap<OpOperand *, Value>)>
         bodyBuilderFn,
     Optional<LinalgLoopDistributionOptions>, ArrayRef<StringRef>) {
   SmallVector<Value> iterArgInitValues = linalgOp.getOutputTensorOperands();
@@ -578,12 +578,58 @@ void GenerateLoopNest<AffineForOp>::doit(
     constantSteps.push_back(op.value());
   }
 
-  mlir::buildAffineLoopNest(b, loc, lbs, ubs, constantSteps,
-                            [&](OpBuilder &b, Location loc, ValueRange ivs) {
-                              SmallVector<Value> operandValuesToUse =
-                                  linalgOp.getInputAndOutputOperands();
-                              bodyBuilderFn(b, loc, ivs, operandValuesToUse);
-                            });
+  // load values for iter args used in reductions
+  llvm::SmallDenseMap<OpOperand *, Value, 4> memrefValueMapping;
+  for (const auto &val : llvm::enumerate(llvm::zip(
+           linalgOp.getOutputOperands(), linalgOp.iterator_types()))) {
+    Attribute iter_arg;
+    OpOperand *op;
+    std::tie(op, iter_arg) = val.value();
+    // TODO: check only read uses in loop, except last statement store?
+    if (isReductionIterator(iter_arg) &&
+        op->get().getType().dyn_cast<MemRefType>().getNumElements() == 1) {
+      memrefValueMapping.insert(
+          std::make_pair(op, b.create<memref::LoadOp>(loc, op->get())));
+    }
+  }
+
+  if (linalgOp.getNumLoops() == 1) {
+    SmallVector<Value> iter_args;
+    for (auto val : memrefValueMapping) {
+      iter_args.push_back(val.getSecond());
+    }
+    auto res =
+        b.create<AffineForOp>(
+             loc, lbs, b.getDimIdentityMap(), ubs, b.getDimIdentityMap(),
+             constantSteps.front(), iter_args,
+             [&](OpBuilder &b, Location loc, Value loop_var,
+                 ValueRange iter_args) {
+               llvm::SmallDenseMap<OpOperand *, Value> iterArgMapping;
+               iterArgMapping.reserve(iter_args.size());
+              for (const auto &op : linalgOp.getOutputOperands())
+               {
+                if (memrefValueMapping.lookup(op) != Value())
+                {
+                  iterArgMapping.insert(std::make_pair(op, iter_args.take_front().front()));
+                }
+              }
+               bodyBuilderFn(b, loc, loop_var, iterArgMapping);
+             })
+            .results();
+
+    // store reduction results from iter args
+    for (auto &en : llvm::enumerate(llvm::zip(res, memrefValueMapping))) {
+      std::pair<OpOperand *, Value> arg;
+      Value r;
+      std::tie(r, arg) = en.value();
+      b.create<memref::StoreOp>(loc, r, arg.first->get());
+    }
+  } else {
+    mlir::buildAffineLoopNest(b, loc, lbs, ubs, constantSteps,
+                              [&](OpBuilder &b, Location loc, ValueRange ivs) {
+                                bodyBuilderFn(b, loc, ivs, llvm::SmallDenseMap<OpOperand *, Value>());
+                              });
+  }
 }
 
 /// Update the `lb`, `ub` and `step` to get per processor `lb`, `ub` and `step`.

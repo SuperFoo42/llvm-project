@@ -67,6 +67,40 @@ static void inlineRegionAndEmitStore(OpBuilder &b, Location loc, OpType op,
   }
 }
 
+static void inlineRegionAndEmitStore(
+    OpBuilder &b, Location loc, LinalgOp op, ArrayRef<Value> indexedValues,
+    ArrayRef<SmallVector<Value>> indexing, ArrayRef<Value> outputBuffers,
+    llvm::SmallDenseMap<OpOperand *, Value> &opIvsMapping) {
+  auto &block = op->getRegion(0).front();
+  BlockAndValueMapping map;
+  map.map(block.getArguments(), indexedValues);
+  for (auto &op : block.without_terminator()) {
+    auto *newOp = b.clone(op, map);
+    map.map(op.getResults(), newOp->getResults());
+  }
+
+  Operation *terminator = block.getTerminator();
+  SmallVector<Value> yields;
+  for (OpOperand &operand : terminator->getOpOperands()) {
+
+    Value toStore = map.lookupOrDefault(operand.get());
+    if (opIvsMapping.lookup(
+            op.getOutputBufferOperands()[operand.getOperandNumber()]) ==
+        Value()) {
+      b.create<AffineStoreOp>(loc, toStore,
+                              outputBuffers[operand.getOperandNumber()],
+                              indexing[operand.getOperandNumber()]);
+    }
+    else
+    {
+      yields.push_back(toStore);
+    }
+  }
+
+  if (!yields.empty())
+    b.create<AffineYieldOp>(loc, yields);
+}
+
 // Returns a pair that contains input indices and output indices of a
 // SingleInputPoolingOp `op`.
 struct InputAndOutputIndices {
@@ -140,7 +174,11 @@ static void emitScalarImplementation(OpBuilder &b, Location loc,
         b.create<LoadOpTy>(loc, inputOperand->get(), indexing));
   }
   // 1.b. Emit load from output views.
-  for (OpOperand *outputOperand : linalgOp.getOutputOperands()) {
+  for (const auto &en : llvm::enumerate(llvm::zip(linalgOp.getOutputOperands(),
+                                                  linalgOp.iterator_types()))) {
+    OpOperand *outputOperand;
+    Attribute iterType;
+    std::tie(outputOperand, iterType) = en.value();
     SmallVector<Value> indexing = makeCanonicalAffineApplies(
         b, loc, linalgOp.getTiedIndexingMap(outputOperand), allIvsPlusDims);
     indexedValues.push_back(
@@ -159,6 +197,56 @@ static void emitScalarImplementation(OpBuilder &b, Location loc,
   }
   inlineRegionAndEmitStore<LoadOpTy, StoreOpTy>(b, loc, linalgOp, indexedValues,
                                                 indexing, outputBuffers);
+}
+
+static void
+emitScalarImplementation(OpBuilder &b, Location loc, ArrayRef<Value> allIvs,
+                         llvm::SmallDenseMap<OpOperand *, Value> &opIvsMapping,
+                         LinalgOp linalgOp) {
+  assert(linalgOp.hasBufferSemantics() &&
+         "expected linalg op with buffer semantics");
+  SmallVector<Value> indexedValues;
+  indexedValues.reserve(linalgOp.getNumInputsAndOutputs());
+
+  auto allIvsPlusDims = SmallVector<Value>(allIvs.begin(), allIvs.end());
+
+  // TODO: Avoid the loads if the corresponding argument of the
+  // region has no uses.
+  // 1.a. Emit load from input operand or for scalars access the operand itself.
+  for (OpOperand *inputOperand : linalgOp.getInputOperands()) {
+    if (linalgOp.isScalar(inputOperand)) {
+      indexedValues.push_back(inputOperand->get());
+      continue;
+    }
+    auto indexing = makeCanonicalAffineApplies(
+        b, loc, linalgOp.getTiedIndexingMap(inputOperand), allIvsPlusDims);
+    indexedValues.push_back(
+        b.create<AffineLoadOp>(loc, inputOperand->get(), indexing));
+  }
+  // 1.b. Emit load from output views.
+  for (auto &op : linalgOp.getOutputOperands()) {
+    SmallVector<Value> indexing = makeCanonicalAffineApplies(
+        b, loc, linalgOp.getTiedIndexingMap(op), allIvsPlusDims);
+    auto val = opIvsMapping.lookup(op);
+    if (val == Value()) {
+      indexedValues.push_back(b.create<AffineLoadOp>(loc, op->get(), indexing));
+    } else {
+      indexedValues.push_back(val);
+    }
+  }
+
+  // TODO: When a region inliner exists, use it.
+  // 2. Inline region, currently only works for a single basic block.
+  // 3. Emit store.
+  SmallVector<SmallVector<Value>, 8> indexing;
+  SmallVector<Value> outputBuffers;
+  for (OpOperand *outputOperand : linalgOp.getOutputBufferOperands()) {
+    indexing.push_back(makeCanonicalAffineApplies(
+        b, loc, linalgOp.getTiedIndexingMap(outputOperand), allIvsPlusDims));
+    outputBuffers.push_back(outputOperand->get());
+  }
+  inlineRegionAndEmitStore(b, loc, linalgOp, indexedValues, indexing,
+                           outputBuffers, opIvsMapping);
 }
 
 /// Replace the index operations in the body of the loop nest by the matching
@@ -220,6 +308,47 @@ static FailureOr<LinalgLoops> linalgOpToLoopsImpl(PatternRewriter &rewriter,
                "expect operands are captured and not passed by loop argument");
         allIvs.append(ivs.begin(), ivs.end());
         emitScalarImplementation<LoadOpTy, StoreOpTy>(b, loc, allIvs, linalgOp);
+        return scf::ValueVector{};
+      });
+  // Number of loop ops might be different from the number of ivs since some
+  // loops like affine.parallel and scf.parallel have multiple ivs.
+  SetVector<Operation *> loopSet;
+  for (Value iv : allIvs) {
+    if (!iv)
+      return failure();
+    // The induction variable is a block argument of the entry block of the
+    // loop operation.
+    BlockArgument ivVal = iv.dyn_cast<BlockArgument>();
+    if (!ivVal)
+      return failure();
+    loopSet.insert(ivVal.getOwner()->getParentOp());
+  }
+  LinalgLoops loops(loopSet.begin(), loopSet.end());
+  // Replace all index operations in the loop body.
+  replaceIndexOpsByInductionVariables(linalgOp, rewriter, loops);
+  return loops;
+}
+
+template <>
+FailureOr<LinalgLoops>
+linalgOpToLoopsImpl<AffineForOp>(PatternRewriter &rewriter, LinalgOp linalgOp) {
+  // The flattened loopToOperandRangesMaps is expected to be an invertible
+  // permutation map (which is asserted in the inverse calculation).
+  assert(linalgOp.hasBufferSemantics() &&
+         "expected linalg op with buffer semantics");
+
+  auto loopRanges = linalgOp.createLoopRanges(rewriter, linalgOp.getLoc());
+  auto iteratorTypes = llvm::to_vector<4>(linalgOp.iterator_types().getValue());
+
+  SmallVector<Value> allIvs;
+  GenerateLoopNest<AffineForOp>::doit(
+      rewriter, linalgOp.getLoc(), loopRanges, linalgOp, iteratorTypes,
+      [&](OpBuilder &b, Location loc, ValueRange ivs,
+          llvm::SmallDenseMap<OpOperand *, Value> iterArgOpOperandMapping)
+          -> scf::ValueVector {
+        allIvs.append(ivs.begin(), ivs.end());
+        emitScalarImplementation(b, loc, allIvs, iterArgOpOperandMapping,
+                                 linalgOp);
         return scf::ValueVector{};
       });
   // Number of loop ops might be different from the number of ivs since some

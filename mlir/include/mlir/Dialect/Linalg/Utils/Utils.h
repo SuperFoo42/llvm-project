@@ -479,6 +479,14 @@ struct GenerateLoopNest {
                        bodyBuilderFn,
                    Optional<LinalgLoopDistributionOptions> = None,
                    ArrayRef<StringRef> distributionTypes = {});
+
+  static void doit(OpBuilder &b, Location loc, ArrayRef<Range> loopRanges,
+                   LinalgOp linalgOp, ArrayRef<Attribute> iteratorTypes,
+                   function_ref<scf::ValueVector(OpBuilder &, Location,
+                                                 ValueRange, llvm::SmallDenseMap<OpOperand *, Value>)>
+                       bodyBuilderFn,
+                   Optional<LinalgLoopDistributionOptions> = None,
+                   ArrayRef<StringRef> distributionTypes = {});
 };
 
 } // namespace linalg

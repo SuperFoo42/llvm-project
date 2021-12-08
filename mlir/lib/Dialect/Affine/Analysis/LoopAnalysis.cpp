@@ -218,8 +218,10 @@ static bool isContiguousAccess(Value iv, LoadOrStoreOp memoryOp,
   assert(memRefDim && "memRefDim == nullptr");
   auto memRefType = memoryOp.getMemRefType();
 
+/*
   if (!memRefType.getLayout().isIdentity())
     return memoryOp.emitError("NYI: non-trivial layoutMap"), false;
+*/
 
   int uniqueVaryingIndexAlongIv = -1;
   auto accessMap = memoryOp.getAffineMap();
