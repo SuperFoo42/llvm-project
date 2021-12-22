@@ -177,10 +177,11 @@ static bool isReserved(InputSectionBase *sec) {
     // SHT_NOTE sections in a group are subject to garbage collection.
     return !sec->nextInSectionGroup;
   default:
+    // Support SHT_PROGBITS .init_array for a while
+    // (https://golang.org/issue/50295).
     StringRef s = sec->name;
-    return s.startswith(".ctors") || s.startswith(".dtors") ||
-           s.startswith(".init") || s.startswith(".fini") ||
-           s.startswith(".jcr");
+    return s == ".init" || s == ".fini" || s == ".init_array" || s == ".jcr" ||
+           s.startswith(".ctors") || s.startswith(".dtors");
   }
 }
 
@@ -312,7 +313,7 @@ template <class ELFT> void MarkLive<ELFT>::mark() {
 // to from __start_/__stop_ symbols because there will only be one set of
 // symbols for the whole program.
 template <class ELFT> void MarkLive<ELFT>::moveToMain() {
-  for (InputFile *file : objectFiles)
+  for (ELFFileBase *file : objectFiles)
     for (Symbol *s : file->getSymbols())
       if (auto *d = dyn_cast<Defined>(s))
         if ((d->type == STT_GNU_IFUNC || d->type == STT_TLS) && d->section &&

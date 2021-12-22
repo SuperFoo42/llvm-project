@@ -264,8 +264,8 @@ InputSection *elf::createInterpSection() {
 
 Defined *elf::addSyntheticLocal(StringRef name, uint8_t type, uint64_t value,
                                 uint64_t size, InputSectionBase &section) {
-  auto *s = make<Defined>(section.file, name, STB_LOCAL, STV_DEFAULT, type,
-                          value, size, &section);
+  Defined *s = makeDefined(section.file, name, STB_LOCAL, STV_DEFAULT, type,
+                           value, size, &section);
   if (in.symTab)
     in.symTab->addSymbol(s);
   return s;
@@ -763,18 +763,18 @@ size_t MipsGotSection::FileGot::getIndexedEntriesNum() const {
 }
 
 MipsGotSection::FileGot &MipsGotSection::getGot(InputFile &f) {
-  if (!f.mipsGotIndex.hasValue()) {
+  if (f.mipsGotIndex == uint32_t(-1)) {
     gots.emplace_back();
     gots.back().file = &f;
     f.mipsGotIndex = gots.size() - 1;
   }
-  return gots[*f.mipsGotIndex];
+  return gots[f.mipsGotIndex];
 }
 
 uint64_t MipsGotSection::getPageEntryOffset(const InputFile *f,
                                             const Symbol &sym,
                                             int64_t addend) const {
-  const FileGot &g = gots[*f->mipsGotIndex];
+  const FileGot &g = gots[f->mipsGotIndex];
   uint64_t index = 0;
   if (const OutputSection *outSec = sym.getOutputSection()) {
     uint64_t secAddr = getMipsPageAddr(outSec->addr);
@@ -788,7 +788,7 @@ uint64_t MipsGotSection::getPageEntryOffset(const InputFile *f,
 
 uint64_t MipsGotSection::getSymEntryOffset(const InputFile *f, const Symbol &s,
                                            int64_t addend) const {
-  const FileGot &g = gots[*f->mipsGotIndex];
+  const FileGot &g = gots[f->mipsGotIndex];
   Symbol *sym = const_cast<Symbol *>(&s);
   if (sym->isTls())
     return g.tls.lookup(sym) * config->wordsize;
@@ -798,13 +798,13 @@ uint64_t MipsGotSection::getSymEntryOffset(const InputFile *f, const Symbol &s,
 }
 
 uint64_t MipsGotSection::getTlsIndexOffset(const InputFile *f) const {
-  const FileGot &g = gots[*f->mipsGotIndex];
+  const FileGot &g = gots[f->mipsGotIndex];
   return g.dynTlsSymbols.lookup(nullptr) * config->wordsize;
 }
 
 uint64_t MipsGotSection::getGlobalDynOffset(const InputFile *f,
                                             const Symbol &s) const {
-  const FileGot &g = gots[*f->mipsGotIndex];
+  const FileGot &g = gots[f->mipsGotIndex];
   Symbol *sym = const_cast<Symbol *>(&s);
   return g.dynTlsSymbols.lookup(sym) * config->wordsize;
 }
@@ -1061,10 +1061,9 @@ uint64_t MipsGotSection::getGp(const InputFile *f) const {
   // For files without related GOT or files refer a primary GOT
   // returns "common" _gp value. For secondary GOTs calculate
   // individual _gp values.
-  if (!f || !f->mipsGotIndex.hasValue() || *f->mipsGotIndex == 0)
+  if (!f || f->mipsGotIndex == uint32_t(-1) || f->mipsGotIndex == 0)
     return ElfSym::mipsGp->getVA(0);
-  return getVA() + gots[*f->mipsGotIndex].startIndex * config->wordsize +
-         0x7ff0;
+  return getVA() + gots[f->mipsGotIndex].startIndex * config->wordsize + 0x7ff0;
 }
 
 void MipsGotSection::writeTo(uint8_t *buf) {
@@ -1653,13 +1652,19 @@ RelrBaseSection::RelrBaseSection()
                        config->wordsize, ".relr.dyn") {}
 
 template <class ELFT>
-static void encodeDynamicReloc(SymbolTableBaseSection *symTab,
-                               typename ELFT::Rela *p,
+static void encodeDynamicReloc(typename ELFT::Rela *p,
                                const DynamicReloc &rel) {
+  p->r_offset = rel.r_offset;
+  p->setSymbolAndType(rel.r_sym, rel.type, config->isMips64EL);
   if (config->isRela)
-    p->r_addend = rel.computeAddend();
-  p->r_offset = rel.getOffset();
-  p->setSymbolAndType(rel.getSymIndex(symTab), rel.type, config->isMips64EL);
+    p->r_addend = rel.addend;
+}
+
+void DynamicReloc::computeRaw(SymbolTableBaseSection *symtab) {
+  r_offset = getOffset();
+  r_sym = getSymIndex(symtab);
+  addend = computeAddend();
+  kind = AddendOnly; // Catch errors
 }
 
 template <class ELFT>
@@ -1674,20 +1679,21 @@ RelocationSection<ELFT>::RelocationSection(StringRef name, bool sort)
 template <class ELFT> void RelocationSection<ELFT>::writeTo(uint8_t *buf) {
   SymbolTableBaseSection *symTab = getPartition().dynSymTab;
 
+  parallelForEach(relocs,
+                  [symTab](DynamicReloc &rel) { rel.computeRaw(symTab); });
   // Sort by (!IsRelative,SymIndex,r_offset). DT_REL[A]COUNT requires us to
   // place R_*_RELATIVE first. SymIndex is to improve locality, while r_offset
   // is to make results easier to read.
-  if (sort)
-    llvm::stable_sort(
-        relocs, [&](const DynamicReloc &a, const DynamicReloc &b) {
-          return std::make_tuple(a.type != target->relativeRel,
-                                 a.getSymIndex(symTab), a.getOffset()) <
-                 std::make_tuple(b.type != target->relativeRel,
-                                 b.getSymIndex(symTab), b.getOffset());
-        });
+  if (sort) {
+    const RelType relativeRel = target->relativeRel;
+    parallelSort(relocs, [&](const DynamicReloc &a, const DynamicReloc &b) {
+      return std::make_tuple(a.type != relativeRel, a.r_sym, a.r_offset) <
+             std::make_tuple(b.type != relativeRel, b.r_sym, b.r_offset);
+    });
+  }
 
   for (const DynamicReloc &rel : relocs) {
-    encodeDynamicReloc<ELFT>(symTab, reinterpret_cast<Elf_Rela *>(buf), rel);
+    encodeDynamicReloc<ELFT>(reinterpret_cast<Elf_Rela *>(buf), rel);
     buf += config->isRela ? sizeof(Elf_Rela) : sizeof(Elf_Rel);
   }
 }
@@ -1765,7 +1771,11 @@ bool AndroidPackedRelocationSection<ELFT>::updateAllocSize() {
 
   for (const DynamicReloc &rel : relocs) {
     Elf_Rela r;
-    encodeDynamicReloc<ELFT>(getPartition().dynSymTab, &r, rel);
+    r.r_offset = rel.getOffset();
+    r.setSymbolAndType(rel.getSymIndex(getPartition().dynSymTab), rel.type,
+                       false);
+    if (config->isRela)
+      r.r_addend = rel.computeAddend();
 
     if (r.getType(config->isMips64EL) == target->relativeRel)
       relatives.push_back(r);
@@ -2175,7 +2185,8 @@ static BssSection *getCommonSec(Symbol *sym) {
 static uint32_t getSymSectionIndex(Symbol *sym) {
   if (getCommonSec(sym))
     return SHN_COMMON;
-  if (!isa<Defined>(sym) || sym->needsPltAddr)
+  assert(!(sym->needsCopy && sym->isObject()));
+  if (!isa<Defined>(sym) || sym->needsCopy)
     return SHN_UNDEF;
   if (const OutputSection *os = sym->getOutputSection())
     return os->sectionIndex >= SHN_LORESERVE ? (uint32_t)SHN_XINDEX
@@ -2250,7 +2261,7 @@ template <class ELFT> void SymbolTableSection<ELFT>::writeTo(uint8_t *buf) {
 
     for (SymbolTableEntry &ent : symbols) {
       Symbol *sym = ent.sym;
-      if (sym->isInPlt() && sym->needsPltAddr)
+      if (sym->isInPlt() && sym->needsCopy)
         eSym->st_other |= STO_MIPS_PLT;
       if (isMicroMips()) {
         // We already set the less-significant bit for symbols
@@ -2261,7 +2272,7 @@ template <class ELFT> void SymbolTableSection<ELFT>::writeTo(uint8_t *buf) {
         // like `objdump` will be able to deal with a correct
         // symbol position.
         if (sym->isDefined() &&
-            ((sym->stOther & STO_MIPS_MICROMIPS) || sym->needsPltAddr)) {
+            ((sym->stOther & STO_MIPS_MICROMIPS) || sym->needsCopy)) {
           if (!strTabSec.isDynamic())
             eSym->st_value &= ~1;
           eSym->st_other |= STO_MIPS_MICROMIPS;
@@ -2426,10 +2437,10 @@ static uint32_t hashGnu(StringRef name) {
 // Add symbols to this symbol hash table. Note that this function
 // destructively sort a given vector -- which is needed because
 // GNU-style hash table places some sorting requirements.
-void GnuHashTableSection::addSymbols(std::vector<SymbolTableEntry> &v) {
+void GnuHashTableSection::addSymbols(SmallVectorImpl<SymbolTableEntry> &v) {
   // We cannot use 'auto' for Mid because GCC 6.1 cannot deduce
   // its type correctly.
-  std::vector<SymbolTableEntry>::iterator mid =
+  auto mid =
       std::stable_partition(v.begin(), v.end(), [&](const SymbolTableEntry &s) {
         return !s.sym->isDefined() || s.sym->partition != partition;
       });
@@ -2715,16 +2726,17 @@ void GdbIndexSection::initOutputSize() {
   }
 }
 
-static std::vector<GdbIndexSection::CuEntry> readCuList(DWARFContext &dwarf) {
-  std::vector<GdbIndexSection::CuEntry> ret;
+static SmallVector<GdbIndexSection::CuEntry, 0>
+readCuList(DWARFContext &dwarf) {
+  SmallVector<GdbIndexSection::CuEntry, 0> ret;
   for (std::unique_ptr<DWARFUnit> &cu : dwarf.compile_units())
     ret.push_back({cu->getOffset(), cu->getLength() + 4});
   return ret;
 }
 
-static std::vector<GdbIndexSection::AddressEntry>
+static SmallVector<GdbIndexSection::AddressEntry, 0>
 readAddressAreas(DWARFContext &dwarf, InputSection *sec) {
-  std::vector<GdbIndexSection::AddressEntry> ret;
+  SmallVector<GdbIndexSection::AddressEntry, 0> ret;
 
   uint32_t cuIdx = 0;
   for (std::unique_ptr<DWARFUnit> &cu : dwarf.compile_units()) {
@@ -2757,7 +2769,7 @@ readAddressAreas(DWARFContext &dwarf, InputSection *sec) {
 template <class ELFT>
 static std::vector<GdbIndexSection::NameAttrEntry>
 readPubNamesAndTypes(const LLDDwarfObj<ELFT> &obj,
-                     const std::vector<GdbIndexSection::CuEntry> &cus) {
+                     const SmallVectorImpl<GdbIndexSection::CuEntry> &cus) {
   const LLDDWARFSection &pubNames = obj.getGnuPubnamesSection();
   const LLDDWARFSection &pubTypes = obj.getGnuPubtypesSection();
 
@@ -3254,8 +3266,8 @@ void MergeTailSection::finalizeContents() {
 }
 
 void MergeNoTailSection::writeTo(uint8_t *buf) {
-  for (size_t i = 0; i < numShards; ++i)
-    shards[i].write(buf + shardOffsets[i]);
+  parallelForEachN(0, numShards,
+                   [&](size_t i) { shards[i].write(buf + shardOffsets[i]); });
 }
 
 // This function is very hot (i.e. it can take several seconds to finish)
@@ -3310,15 +3322,6 @@ void MergeNoTailSection::finalizeContents() {
         sec->pieces[i].outputOff +=
             shardOffsets[getShardId(sec->pieces[i].hash)];
   });
-}
-
-MergeSyntheticSection *elf::createMergeSynthetic(StringRef name, uint32_t type,
-                                                 uint64_t flags,
-                                                 uint32_t alignment) {
-  bool shouldTailMerge = (flags & SHF_STRINGS) && config->optimize >= 2;
-  if (shouldTailMerge)
-    return make<MergeTailSection>(name, type, flags, alignment);
-  return make<MergeNoTailSection>(name, type, flags, alignment);
 }
 
 template <class ELFT> void elf::splitSections() {
