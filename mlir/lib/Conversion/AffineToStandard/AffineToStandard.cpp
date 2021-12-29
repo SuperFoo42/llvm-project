@@ -695,7 +695,7 @@ public:
       return failure();
 
     // Build vector.load memref[expandedMap.results].
-    rewriter.replaceOpWithNewOp<vector::LoadOp>(
+    rewriter.replaceOpWithNewOp<vector::TransferReadOp>(
         op, op.getVectorType(), op.getMemRef(), *resultOperands);
     return success();
   }
