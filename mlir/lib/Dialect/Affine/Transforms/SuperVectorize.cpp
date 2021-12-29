@@ -1193,8 +1193,17 @@ static Operation *vectorizeAffineLoad(AffineLoadOp loadOp,
   LLVM_DEBUG(dbgs() << "\n[early-vect]+++++ permutationMap: ");
   LLVM_DEBUG(permutationMap.print(dbgs()));
 
-  auto transfer = state.builder.create<vector::TransferReadOp>(
-      loadOp.getLoc(), vectorType, loadOp.getMemRef(), indices, permutationMap);
+  //TODO: does this work in all cases?
+  Operation *transfer;
+  if (permutationMap.isIdentity()){
+    transfer = state.builder.create<AffineVectorLoadOp>(
+        loadOp.getLoc(), vectorType, loadOp.getMemRef(), indices);
+  }
+  else {
+    transfer = state.builder.create<vector::TransferReadOp>(
+        loadOp.getLoc(), vectorType, loadOp.getMemRef(), indices,
+        permutationMap);
+  }
 
   // Register replacement for future uses in the scope.
   state.registerOpVectorReplacement(loadOp, transfer);
