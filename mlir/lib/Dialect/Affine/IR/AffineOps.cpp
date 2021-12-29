@@ -19,6 +19,7 @@
 #include "llvm/ADT/SmallBitVector.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Debug.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 
 using namespace mlir;
 
@@ -290,7 +291,7 @@ bool mlir::isValidDim(Value value, Region *region) {
     // This value has to be a block argument for an affine.for or an
     // affine.parallel.
     auto *parentOp = value.cast<BlockArgument>().getOwner()->getParentOp();
-    return isa<AffineForOp, AffineParallelOp>(parentOp);
+    return isa<AffineForOp, AffineParallelOp, linalg::TiledLoopOp>(parentOp); //FIXME:shitfix to also allow linalg tiled loop arguments
   }
 
   // Affine apply operation is ok if all of its operands are ok.
