@@ -1195,7 +1195,7 @@ static Operation *vectorizeAffineLoad(AffineLoadOp loadOp,
 
   //TODO: does this work in all cases?
   Operation *transfer;
-  if (permutationMap.isIdentity()){
+ if (permutationMap.isIdentity()){
     transfer = state.builder.create<AffineVectorLoadOp>(
         loadOp.getLoc(), vectorType, loadOp.getMemRef(), indices);
   }
