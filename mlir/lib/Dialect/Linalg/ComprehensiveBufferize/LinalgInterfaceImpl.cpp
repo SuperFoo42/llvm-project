@@ -203,6 +203,8 @@ struct InitTensorOpInterface
     Value alloc = state.createAllocDeallocPair(b, initTensorOp->getLoc(),
                                                initTensorOp.result());
     state.replaceOp(op, alloc);
+
+
     return success();
   }
 };

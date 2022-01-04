@@ -97,7 +97,6 @@ static void inlineRegionAndEmitStore(
     }
   }
 
-  if (!yields.empty())
     b.create<AffineYieldOp>(loc, yields);
 }
 

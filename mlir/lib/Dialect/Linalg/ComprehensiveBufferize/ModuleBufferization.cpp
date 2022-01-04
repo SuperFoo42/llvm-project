@@ -313,7 +313,7 @@ static LogicalResult bufferizeFuncOpBoundary(FuncOp funcOp,
     // Replace all uses of bbArg through a ToMemRefOp by a memref::CastOp.
     for (auto &use : llvm::make_early_inc_range(bbArg.getUses())) {
       if (auto toMemrefOp =
-          dyn_cast<bufferization::ToMemrefOp>(use.getOwner())) {
+              dyn_cast<bufferization::ToMemrefOp>(use.getOwner())) {
         auto castOp = b.create<memref::CastOp>(
             funcOp.getLoc(), toMemrefOp.memref().getType(), memref);
         toMemrefOp.memref().replaceAllUsesWith(castOp);
@@ -646,8 +646,20 @@ struct ReturnOpInterface
       if (!tensorType)
         continue;
       Value v = state.lookupBuffer(operand.get());
-      Value returnTensor = b.create<bufferization::ToTensorOp>(
-          returnOp.getLoc(), v);
+      Value source = getNonCastedValue(v);
+
+      for (auto user : source.getUsers()) {
+        if (llvm::isa<MemoryEffectOpInterface>(user) &&
+            llvm::dyn_cast<MemoryEffectOpInterface>(user)
+                .hasEffect<MemoryEffects::Free>()) // remove previously issued
+                                                   // deallocs to prevent
+                                                   // use-after-free
+        {
+          user->erase();
+        }
+      }
+      Value returnTensor =
+          b.create<bufferization::ToTensorOp>(returnOp.getLoc(), v);
       operand.set(returnTensor);
     }
     return success();
@@ -673,8 +685,8 @@ struct FuncOpInterface
 
     // In a first approximation:
     // =========================
-    // If the function is called, we can allocate on the caller side which lets
-    // us force inplace arguments at function boundaries.
+    // If the function is called, we can allocate on the caller side which
+    // lets us force inplace arguments at function boundaries.
     // TODO: do not rely on this behavior.
     if (moduleState.callerMap.find(funcOp) != moduleState.callerMap.end())
       return true;
