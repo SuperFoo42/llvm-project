@@ -90,13 +90,11 @@ static void inlineRegionAndEmitStore(
       b.create<AffineStoreOp>(loc, toStore,
                               outputBuffers[operand.getOperandNumber()],
                               indexing[operand.getOperandNumber()]);
-    }
-    else
-    {
+    } else {
       yields.push_back(toStore);
     }
   }
-
+  if (op.getNumLoops() > 0)
     b.create<AffineYieldOp>(loc, yields);
 }
 
