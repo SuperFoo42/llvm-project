@@ -28,6 +28,7 @@ else()
   set(CMAKE_CFG_RESOLVED_INTDIR "")
 endif()
 
+include(SetPlatformToolchainTools)
 include(base-config-ix)
 include(CompilerRTUtils)
 
@@ -53,6 +54,7 @@ option(COMPILER_RT_BUILD_ORC "Build ORC runtime" ON)
 mark_as_advanced(COMPILER_RT_BUILD_ORC)
 option(COMPILER_RT_BUILD_GWP_ASAN "Build GWP-ASan, and link it into SCUDO" ON)
 mark_as_advanced(COMPILER_RT_BUILD_GWP_ASAN)
+option(COMPILER_RT_ENABLE_CET "Build Compiler RT with CET enabled" OFF)
 
 if(FUCHSIA)
   set(COMPILER_RT_HWASAN_WITH_INTERCEPTORS_DEFAULT OFF)
@@ -242,6 +244,14 @@ include(config-ix)
 #================================
 # Setup Compiler Flags
 #================================
+
+# fcf-protection is a gcc/clang option for CET support on Linux platforms.
+# We need to handle MSVC CET option on Windows platforms.
+if (NOT MSVC)
+  if (COMPILER_RT_ENABLE_CET AND NOT COMPILER_RT_HAS_FCF_PROTECTION_FLAG)
+    message(FATAL_ERROR "Compiler used to build compiler-rt doesn't support CET!")
+  endif()
+endif()
 
 if(MSVC)
   # Override any existing /W flags with /W4. This is what LLVM does.  Failing to
@@ -574,15 +584,6 @@ if (CMAKE_LINKER MATCHES "link.exe$")
   set(CMAKE_STATIC_LINKER_FLAGS "${CMAKE_STATIC_LINKER_FLAGS} /IGNORE:4221")
 endif()
 
-if(${CMAKE_SYSTEM_NAME} MATCHES "AIX")
-  set(CMAKE_C_ARCHIVE_CREATE "<CMAKE_AR> -X32_64 qc <TARGET> <LINK_FLAGS> <OBJECTS>")
-  set(CMAKE_CXX_ARCHIVE_CREATE "<CMAKE_AR> -X32_64 qc <TARGET> <LINK_FLAGS> <OBJECTS>")
-  set(CMAKE_C_ARCHIVE_APPEND "<CMAKE_AR> -X32_64 q <TARGET> <LINK_FLAGS> <OBJECTS>")
-  set(CMAKE_CXX_ARCHIVE_APPEND "<CMAKE_AR> -X32_64 q <TARGET> <LINK_FLAGS> <OBJECTS>")
-  set(CMAKE_C_ARCHIVE_FINISH "<CMAKE_RANLIB> -X32_64 <TARGET>")
-  set(CMAKE_CXX_ARCHIVE_FINISH "<CMAKE_RANLIB> -X32_64 <TARGET>")
-endif()
-
 add_subdirectory(include)
 
 option(COMPILER_RT_USE_LIBCXX
@@ -629,9 +630,6 @@ if(ANDROID)
   set(COMPILER_RT_TEST_USE_LLD TRUE)
   append_list_if(COMPILER_RT_HAS_FUSE_LD_LLD_FLAG -fuse-ld=lld SANITIZER_COMMON_LINK_FLAGS)
   append_list_if(COMPILER_RT_HAS_LLD -fuse-ld=lld COMPILER_RT_UNITTEST_LINK_FLAGS)
-  if(COMPILER_RT_HAS_FUSE_LD_LLD_FLAG)
-    set(COMPILER_RT_HAS_GNU_VERSION_SCRIPT_COMPAT FALSE)
-  endif()
 endif()
 pythonize_bool(COMPILER_RT_HAS_LLD)
 pythonize_bool(COMPILER_RT_TEST_USE_LLD)

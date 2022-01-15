@@ -3192,14 +3192,14 @@ the configuration (without a prefix: ``Auto``).
 **PenaltyBreakFirstLessLess** (``Unsigned``) :versionbadge:`clang-format 3.7`
   The penalty for breaking before the first ``<<``.
 
+**PenaltyBreakOpenParenthesis** (``Unsigned``) :versionbadge:`clang-format 14`
+  The penalty for breaking after ``(``.
+
 **PenaltyBreakString** (``Unsigned``) :versionbadge:`clang-format 3.7`
   The penalty for each line break introduced inside a string literal.
 
 **PenaltyBreakTemplateDeclaration** (``Unsigned``) :versionbadge:`clang-format 7`
   The penalty for breaking after template declaration.
-
-**PenaltyBreakOpenParenthesis** (``Unsigned``) :versionbadge:`clang-format 14`
-  The penalty for breaking after ``(``.
 
 **PenaltyExcessCharacter** (``Unsigned``) :versionbadge:`clang-format 3.7`
   The penalty for each character outside of the column limit.
@@ -3402,20 +3402,65 @@ the configuration (without a prefix: ``Auto``).
      /* second veryVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryLongComment with plenty of
       * information */
 
+**RemoveBracesLLVM** (``Boolean``) :versionbadge:`clang-format 14`
+  Remove optional braces of control statements (``if``, ``else``, ``for``,
+  and ``while``) in C++ according to the LLVM coding style.
+
+  .. warning:: 
+
+   This option will be renamed and expanded to support other styles.
+
+  .. warning:: 
+
+   Setting this option to `true` could lead to incorrect code formatting due
+   to clang-format's lack of complete semantic information. As such, extra
+   care should be taken to review code changes made by this option.
+
+  .. code-block:: c++
+
+    false:                                     true:
+
+    if (isa<FunctionDecl>(D)) {        vs.     if (isa<FunctionDecl>(D))
+      handleFunctionDecl(D);                     handleFunctionDecl(D);
+    } else if (isa<VarDecl>(D)) {              else if (isa<VarDecl>(D))
+      handleVarDecl(D);                          handleVarDecl(D);
+    }
+
+    if (isa<VarDecl>(D)) {             vs.     if (isa<VarDecl>(D)) {
+      for (auto *A : D.attrs()) {                for (auto *A : D.attrs())
+        if (shouldProcessAttr(A)) {                if (shouldProcessAttr(A))
+          handleAttr(A);                             handleAttr(A);
+        }                                      }
+      }
+    }
+
+    if (isa<FunctionDecl>(D)) {        vs.     if (isa<FunctionDecl>(D))
+      for (auto *A : D.attrs()) {                for (auto *A : D.attrs())
+        handleAttr(A);                             handleAttr(A);
+      }
+    }
+
+    if (auto *D = (T)(D)) {            vs.     if (auto *D = (T)(D)) {
+      if (shouldProcess(D)) {                    if (shouldProcess(D))
+        handleVarDecl(D);                          handleVarDecl(D);
+      } else {                                   else
+        markAsIgnored(D);                          markAsIgnored(D);
+      }                                        }
+    }
+
+    if (a) {                           vs.     if (a)
+      b();                                       b();
+    } else {                                   else if (c)
+      if (c) {                                   d();
+        d();                                   else
+      } else {                                   e();
+        e();
+      }
+    }
+
 **SeparateDefinitionBlocks** (``SeparateDefinitionStyle``) :versionbadge:`clang-format 14`
-  Specifies the use of empty lines to separate definition blocks, including classes,
-  structs, enums, and functions.
-
-  Possible values:
-
-  * ``SDS_Leave`` (in configuration: ``Leave``)
-    Leave definition blocks as they are.
-
-  * ``SDS_Always`` (in configuration: ``Always``)
-    Insert an empty line between definition blocks.
-
-  * ``SDS_Never`` (in configuration: ``Never``)
-    Remove any empty line between definition blocks.
+  Specifies the use of empty lines to separate definition blocks, including
+  classes, structs, enums, and functions.
 
   .. code-block:: c++
 
@@ -3460,6 +3505,19 @@ the configuration (without a prefix: ``Auto``).
 
                                      class C {};
                                      }
+
+  Possible values:
+
+  * ``SDS_Leave`` (in configuration: ``Leave``)
+    Leave definition blocks as they are.
+
+  * ``SDS_Always`` (in configuration: ``Always``)
+    Insert an empty line between definition blocks.
+
+  * ``SDS_Never`` (in configuration: ``Never``)
+    Remove any empty line between definition blocks.
+
+
 
 **ShortNamespaceLines** (``Unsigned``) :versionbadge:`clang-format 14`
   The maximal number of unwrapped lines that a short namespace spans.
@@ -3817,6 +3875,15 @@ the configuration (without a prefix: ``Auto``).
        true:                                  false:
        IF (...)                        vs.    IF(...)
          <conditional-body>                     <conditional-body>
+
+  * ``bool AfterOverloadedOperator`` If ``true``, put a space between operator overloading and opening
+    parentheses.
+
+    .. code-block:: c++
+
+       true:                                  false:
+       void operator++ (int a);        vs.    void operator++(int a);
+       object.operator++ (10);                object.operator++(10);
 
   * ``bool BeforeNonEmptyParentheses`` If ``true``, put a space before opening parentheses only if the
     parentheses are not empty.

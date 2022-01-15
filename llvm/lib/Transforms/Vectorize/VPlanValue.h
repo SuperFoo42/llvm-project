@@ -102,6 +102,7 @@ public:
 
     // Phi-like VPValues. Need to be kept together.
     VPVBlendSC,
+    VPVCanonicalIVPHISC,
     VPVFirstOrderRecurrencePHISC,
     VPVWidenPHISC,
     VPVWidenIntOrFpInductionSC,
@@ -333,6 +334,7 @@ public:
 
     // Phi-like recipes. Need to be kept together.
     VPBlendSC,
+    VPCanonicalIVPHISC,
     VPFirstOrderRecurrencePHISC,
     VPWidenPHISC,
     VPWidenIntOrFpInductionSC,
@@ -403,7 +405,6 @@ public:
 
 class VPlan;
 class VPBasicBlock;
-class VPRegionBlock;
 
 /// This class can be used to assign consecutive numbers to all VPValues in a
 /// VPlan and allows querying the numbering for printing, similar to the

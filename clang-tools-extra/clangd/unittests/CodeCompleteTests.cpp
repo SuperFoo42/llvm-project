@@ -1294,6 +1294,25 @@ TEST(SignatureHelpTest, Constructors) {
   CheckBracedInit("int x(S); int i = x({^});");
 }
 
+TEST(SignatureHelpTest, Aggregates) {
+  std::string Top = R"cpp(
+    struct S {
+      int a, b, c, d;
+    };
+  )cpp";
+  auto AggregateSig = Sig("S{[[int a]], [[int b]], [[int c]], [[int d]]}");
+  EXPECT_THAT(signatures(Top + "S s{^}").signatures,
+              UnorderedElementsAre(AggregateSig, Sig("S{}"),
+                                   Sig("S{[[const S &]]}"),
+                                   Sig("S{[[S &&]]}")));
+  EXPECT_THAT(signatures(Top + "S s{1,^}").signatures,
+              ElementsAre(AggregateSig));
+  EXPECT_EQ(signatures(Top + "S s{1,^}").activeParameter, 1);
+  EXPECT_THAT(signatures(Top + "S s{.c=3,^}").signatures,
+              ElementsAre(AggregateSig));
+  EXPECT_EQ(signatures(Top + "S s{.c=3,^}").activeParameter, 3);
+}
+
 TEST(SignatureHelpTest, OverloadInitListRegression) {
   auto Results = signatures(R"cpp(
     struct A {int x;};
@@ -1987,6 +2006,36 @@ TEST(CompletionTest, ScopeOfClassFieldInConstructorInitializer) {
               UnorderedElementsAre(AllOf(Scope("ns::X::"), Named("x_"))));
 }
 
+// Like other class members, constructor init lists have to parse what's below,
+// after the completion point.
+// But recovering from an incomplete constructor init list is particularly
+// tricky because the bulk of the list is not surrounded by brackets.
+TEST(CompletionTest, ConstructorInitListIncomplete) {
+  auto Results = completions(
+      R"cpp(
+        namespace ns {
+          struct X {
+            X() : x^
+            int xyz_;
+          };
+        }
+      )cpp");
+  EXPECT_THAT(Results.Completions, ElementsAre(Named("xyz_")));
+
+  Results = completions(
+      R"cpp(
+        int foo();
+
+        namespace ns {
+          struct X {
+            X() : xyz_(fo^
+            int xyz_;
+          };
+        }
+      )cpp");
+  EXPECT_THAT(Results.Completions, ElementsAre(Named("foo")));
+}
+
 TEST(CompletionTest, CodeCompletionContext) {
   auto Results = completions(
       R"cpp(
@@ -2631,11 +2680,34 @@ TEST(SignatureHelpTest, InsideArgument) {
 TEST(SignatureHelpTest, ConstructorInitializeFields) {
   {
     const auto Results = signatures(R"cpp(
-      struct A {
-        A(int);
-      };
+      struct A { A(int); };
       struct B {
         B() : a_elem(^) {}
+        A a_elem;
+      };
+    )cpp");
+    EXPECT_THAT(Results.signatures,
+                UnorderedElementsAre(Sig("A([[int]])"), Sig("A([[A &&]])"),
+                                     Sig("A([[const A &]])")));
+  }
+  {
+    const auto Results = signatures(R"cpp(
+      struct A { A(int); };
+      struct B {
+        B() : a_elem(^
+        A a_elem;
+      };
+    )cpp");
+    // FIXME: currently the parser skips over the decl of a_elem as part of the
+    // (broken) init list, so we don't get signatures for the first member.
+    EXPECT_THAT(Results.signatures, IsEmpty());
+  }
+  {
+    const auto Results = signatures(R"cpp(
+      struct A { A(int); };
+      struct B {
+        B() : a_elem(^
+        int dummy_elem;
         A a_elem;
       };
     )cpp");
