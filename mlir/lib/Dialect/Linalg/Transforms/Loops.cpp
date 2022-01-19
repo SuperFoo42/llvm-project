@@ -87,7 +87,7 @@ static void inlineRegionAndEmitStore(
     if (opIvsMapping.lookup(
             op.getOutputBufferOperands()[operand.getOperandNumber()]) ==
         Value()) {
-      b.create<AffineStoreOp>(loc, toStore,
+      b.create<memref::StoreOp>(loc, toStore,
                               outputBuffers[operand.getOperandNumber()],
                               indexing[operand.getOperandNumber()]);
     } else {
@@ -218,7 +218,7 @@ emitScalarImplementation(OpBuilder &b, Location loc, ArrayRef<Value> allIvs,
     auto indexing = makeCanonicalAffineApplies(
         b, loc, linalgOp.getTiedIndexingMap(inputOperand), allIvsPlusDims);
     indexedValues.push_back(
-        b.create<AffineLoadOp>(loc, inputOperand->get(), indexing));
+        b.create<memref::LoadOp>(loc, inputOperand->get(), indexing));
   }
   // 1.b. Emit load from output views.
   for (auto &op : linalgOp.getOutputOperands()) {
@@ -226,7 +226,7 @@ emitScalarImplementation(OpBuilder &b, Location loc, ArrayRef<Value> allIvs,
         b, loc, linalgOp.getTiedIndexingMap(op), allIvsPlusDims);
     auto val = opIvsMapping.lookup(op);
     if (val == Value()) {
-      indexedValues.push_back(b.create<AffineLoadOp>(loc, op->get(), indexing));
+      indexedValues.push_back(b.create<memref::LoadOp>(loc, op->get(), indexing));
     } else {
       indexedValues.push_back(val);
     }
