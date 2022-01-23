@@ -10,6 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include <type_traits>
 #include <utility>
 
 #include "PassDetail.h"
@@ -17,6 +18,7 @@
 #include "mlir/Dialect/Async/IR/Async.h"
 #include "mlir/Dialect/Async/Passes.h"
 #include "mlir/Dialect/Async/Transforms.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BlockAndValueMapping.h"
@@ -215,7 +217,8 @@ getParallelComputeFunctionType(scf::ParallelOp op, PatternRewriter &rewriter) {
   getUsedValuesDefinedAbove(op.getRegion(), op.getRegion(), captures);
 
   SmallVector<Type> inputs;
-  inputs.reserve(2 + 4 * op.getNumLoops() + captures.size());
+  inputs.reserve(2 + 4 * op.getNumLoops() + captures.size() +
+                 op.getNumResults());
 
   Type indexTy = rewriter.getIndexType();
 
@@ -224,33 +227,44 @@ getParallelComputeFunctionType(scf::ParallelOp op, PatternRewriter &rewriter) {
   inputs.push_back(indexTy); // blockSize
 
   // Multi-dimensional parallel iteration space defined by the loop trip counts.
-  for (unsigned i = 0; i < op.getNumLoops(); ++i)
-    inputs.push_back(indexTy); // loop tripCount
+  inputs.insert(inputs.end(), op.getNumLoops(), indexTy);
 
   // Parallel operation lower bound, upper bound and step. Lower bound, upper
   // bound and step passed as contiguous arguments:
   //   call @compute(%lb0, %lb1, ..., %ub0, %ub1, ..., %step0, %step1, ...)
-  for (unsigned i = 0; i < op.getNumLoops(); ++i) {
-    inputs.push_back(indexTy); // lower bound
-    inputs.push_back(indexTy); // upper bound
-    inputs.push_back(indexTy); // step
-  }
+  inputs.insert(inputs.end(), op.getNumLoops() * 3, indexTy);
 
   // Types of the implicit captures.
   for (Value capture : captures)
     inputs.push_back(capture.getType());
+
+  // memrefs to the types of the reduction results
+  for (auto t : op->getResultTypes()) {
+    assert(!t.isa<ShapedType>() &&
+           "only reductions to scalar are supported as of now");
+    inputs.push_back(MemRefType::get({}, t));
+  }
 
   // Convert captures to vector for later convenience.
   SmallVector<Value> capturesVector(captures.begin(), captures.end());
   return {rewriter.getFunctionType(inputs, TypeRange()), capturesVector};
 }
 
-// Create a parallel compute fuction from the parallel operation.
+// Create a parallel compute function from the parallel operation.
 static ParallelComputeFunction createParallelComputeFunction(
     scf::ParallelOp op, const ParallelComputeFunctionBounds &bounds,
     unsigned numBlockAlignedInnerLoops, PatternRewriter &rewriter) {
   OpBuilder::InsertionGuard guard(rewriter);
   ImplicitLocOpBuilder b(op.getLoc(), rewriter);
+
+  // TODO: is this the right place?
+  // create memrefs to hold reduction results
+  SmallVector<Value> reductionResults;
+  reductionResults.reserve(op->getResultTypes().size());
+  for (auto resType : op->getResultTypes()) {
+    reductionResults.push_back(
+        b.create<memref::AllocOp>(MemRefType::get({}, resType)));
+  }
 
   ModuleOp module = op->getParentOfType<ModuleOp>();
 
@@ -367,7 +381,7 @@ static ParallelComputeFunction createParallelComputeFunction(
   // nest are in the first/last iteration.
   SmallVector<Value> isBlockFirstCoord(op.getNumLoops());
   SmallVector<Value> isBlockLastCoord(op.getNumLoops());
-
+  SmallVector<SmallVector<arith::AtomicRMWKind>> reductionOps;
   // Builds inner loop nest inside async.execute operation that does all the
   // work concurrently.
   LoopNestBuilder workLoopBuilder = [&](size_t loopIdx) -> LoopBodyBuilder {
@@ -395,11 +409,13 @@ static ParallelComputeFunction createParallelComputeFunction(
 
       // Keep building loop nest.
       if (loopIdx < op.getNumLoops() - 1) {
+        ValueRange loopResFwd;
         if (loopIdx + 1 >= op.getNumLoops() - numBlockAlignedInnerLoops) {
           // For block aligned loops we always iterate starting from 0 up to
           // the loop trip counts.
-          b.create<scf::ForOp>(c0, tripCounts[loopIdx + 1], c1, ValueRange(),
-                               workLoopBuilder(loopIdx + 1));
+          loopResFwd = b.create<scf::ForOp>(c0, tripCounts[loopIdx + 1], c1,
+                                             args, workLoopBuilder(loopIdx + 1))
+                           .getResults();
 
         } else {
           // Select nested loop lower/upper bounds depending on our position in
@@ -411,34 +427,128 @@ static ParallelComputeFunction createParallelComputeFunction(
                                               blockEndCoord[loopIdx + 1],
                                               tripCounts[loopIdx + 1]);
 
-          b.create<scf::ForOp>(lb, ub, c1, ValueRange(),
-                               workLoopBuilder(loopIdx + 1));
+          loopResFwd = b.create<scf::ForOp>(lb, ub, c1, args,
+                                             workLoopBuilder(loopIdx + 1))
+                           .getResults();
         }
 
-        b.create<scf::YieldOp>(loc);
+        b.create<scf::YieldOp>(loc, loopResFwd);
         return;
       }
 
       // Copy the body of the parallel op into the inner-most loop.
       BlockAndValueMapping mapping;
       mapping.map(op.getInductionVars(), computeBlockInductionVars);
+      // FIXME: this does not look correct
+      mapping.map(op.getInitVals(), args);
       mapping.map(computeFuncType.captures, captures);
+      SmallVector<Value> resVals;
+      if (reductionOps.empty() || !reductionOps.back().empty())
+        reductionOps.emplace_back();
+      for (auto &bodyOp : op.getLoopBody().getOps()) {
+        if (isa<scf::ReduceOp>(bodyOp)) { // reduction on single iter_arg
+          auto redOp = dyn_cast<scf::ReduceOp>(bodyOp);
+          BlockAndValueMapping reductionMapping = mapping;
+          reductionMapping.map(redOp.getReductionOperator().getArgument(0),
+                               args.take_front().front());
+          reductionMapping.map(redOp.getReductionOperator().getArgument(1),
+                               mapping.lookupOrNull(redOp.getOperand()) ==
+                                       nullptr
+                                   ? redOp.getOperand()
+                                   : mapping.lookup(redOp.getOperand()));
+          args = args.drop_front();
+
+          // replace reduction by ops on iter args, however this does only
+          // work for simple reduction blocks, so fail if we can not transform
+          // reduction
+          for (auto &redBop : redOp.getReductionOperator().getOps()) {
+            if (isa<scf::ReduceReturnOp>(redBop))
+              break;
 
       for (auto &bodyOp : op.getLoopBody().getOps())
         b.clone(bodyOp, mapping);
+            auto *tmp = nb.clone(redBop, reductionMapping);
+
+            arith::AtomicRMWKind rmw;
+            if (isa<arith::AddIOp>(redBop)) {
+              rmw = arith::AtomicRMWKind ::addi;
+            } else if (isa<arith::AddFOp>(redBop)) {
+              rmw = arith::AtomicRMWKind ::addf;
+            } else if (isa<arith::MulIOp>(redBop)) {
+              rmw = arith::AtomicRMWKind ::muli;
+            } else if (isa<arith::MulFOp>(redBop)) {
+              rmw = arith::AtomicRMWKind ::mulf;
+            } else if (isa<arith::AndIOp>(redBop)) {
+              rmw = arith::AtomicRMWKind ::andi;
+            } else if (isa<arith::OrIOp>(redBop)) {
+              rmw = arith::AtomicRMWKind ::ori;
+            } else {
+              throw; /*unsupported reduction type*/
+            }
+
+            reductionOps.back().push_back(rmw); // TODO: not so nice side-effect
+            assert(redOp.getReductionOperator().hasOneBlock());
+            if (llvm::find(redOp.getReductionOperator()
+                               .getBlocks()
+                               .front()
+                               .getTerminator()
+                               ->getOperands(),
+                           redBop.getOpResult(0)) !=
+                redOp.getReductionOperator()
+                    .getBlocks()
+                    .front()
+                    .getTerminator()
+                    ->getOperands()
+                    .end()) {
+              resVals.insert(resVals.end(), tmp->getOpResults().begin(),
+                             tmp->getOpResults().end());
+            }
+          }
+        } else if (!isa<scf::YieldOp>(bodyOp))
+          nb.clone(bodyOp, mapping);
+      }
+
+      nb.create<scf::YieldOp>(resVals);
     };
   };
 
   b.create<scf::ForOp>(blockFirstCoord[0], blockEndCoord[0], c1, ValueRange(),
                        workLoopBuilder(0));
   b.create<func::ReturnOp>(ValueRange());
+  SmallVector<Value> initVals;
+  for (auto initVal : op.getInitVals()) {
+    auto tmp = b.clone(*initVal.getDefiningOp());
+    initVals.insert(initVals.end(), tmp->getResults().begin(),
+                    tmp->getResults().end());
+  }
+
+  auto redRes = b.create<scf::ForOp>(blockFirstCoord[0], blockEndCoord[0], c1,
+                                     initVals, workLoopBuilder(0))
+                    .getResults();
+
+  // global reduction through atomic rmw ops
+  for (auto en : llvm::enumerate(llvm::zip(
+           redRes, func.getArguments().take_back(op.getNumReductions()),
+           reductionOps))) {
+    SmallVector<arith::AtomicRMWKind> opKinds;
+    Value partRes, resMemRef;
+    std::tie(partRes, resMemRef, opKinds) = en.value();
+
+    for (auto opK : opKinds) {
+      b.create<memref::AtomicRMWOp>(partRes.getType(), opK, partRes, resMemRef,
+                                    ValueRange()); // assume reduction to scalar
+    }
+  }
+
+  // TODO: for general reductions, use return values?
+  b.create<ReturnOp>(ValueRange());
 
   return {op.getNumLoops(), func, std::move(computeFuncType.captures)};
 }
 
 // Creates recursive async dispatch function for the given parallel compute
-// function. Dispatch function keeps splitting block range into halves until it
-// reaches a single block, and then excecutes it inline.
+// function. Dispatch function keeps splitting block range into halves until
+// it reaches a single block, and then excecutes it inline.
 //
 // Function pseudocode (mix of C++ and MLIR):
 //
@@ -468,8 +578,8 @@ createAsyncDispatchFunction(ParallelComputeFunction &computeFunc,
       computeFunc.func.getFunctionType().getInputs();
 
   // Compared to the parallel compute function async dispatch function takes
-  // additional !async.group argument. Also instead of a single `blockIndex` it
-  // takes `blockStart` and `blockEnd` arguments to define the range of
+  // additional !async.group argument. Also instead of a single `blockIndex`
+  // it takes `blockStart` and `blockEnd` arguments to define the range of
   // dispatched blocks.
   SmallVector<Type> inputTypes;
   inputTypes.push_back(async::GroupType::get(rewriter.getContext()));
@@ -587,8 +697,8 @@ static void doAsyncDispatch(ImplicitLocOpBuilder &b, PatternRewriter &rewriter,
   Value c0 = b.create<arith::ConstantIndexOp>(0);
   Value c1 = b.create<arith::ConstantIndexOp>(1);
 
-  // Appends operands shared by async dispatch and parallel compute functions to
-  // the given operands vector.
+  // Appends operands shared by async dispatch and parallel compute functions
+  // to the given operands vector.
   auto appendBlockComputeOperands = [&](SmallVector<Value> &operands) {
     operands.append(tripCounts);
     operands.append(op.getLowerBound().begin(), op.getLowerBound().end());
@@ -597,9 +707,9 @@ static void doAsyncDispatch(ImplicitLocOpBuilder &b, PatternRewriter &rewriter,
     operands.append(parallelComputeFunction.captures);
   };
 
-  // Check if the block size is one, in this case we can skip the async dispatch
-  // completely. If this will be known statically, then canonicalization will
-  // erase async group operations.
+  // Check if the block size is one, in this case we can skip the async
+  // dispatch completely. If this will be known statically, then
+  // canonicalization will erase async group operations.
   Value isSingleBlock =
       b.create<arith::CmpIOp>(arith::CmpIPredicate::eq, blockCount, c1);
 
@@ -715,19 +825,24 @@ doSequentialDispatch(ImplicitLocOpBuilder &b, PatternRewriter &rewriter,
 LogicalResult
 AsyncParallelForRewrite::matchAndRewrite(scf::ParallelOp op,
                                          PatternRewriter &rewriter) const {
-  // We do not currently support rewrite for parallel op with reductions.
-  if (op.getNumReductions() != 0)
-    return failure();
 
   ImplicitLocOpBuilder b(op.getLoc(), rewriter);
+  // create reduction result memrefs
+  SmallVector<Value> resultMemRefs;
+  resultMemRefs.reserve(op.getNumReductions());
+  for (auto ty : op->getResultTypes()) {
+    assert(!ty.isa<ShapedType>());
+    resultMemRefs.push_back(
+        b.create<memref::AllocaOp>(MemRefType::get({}, ty)));
+  }
 
   // Computing minTaskSize emits IR and can be implemented as executing a cost
-  // model on the body of the scf.parallel. Thus it needs to be computed before
-  // the body of the scf.parallel has been manipulated.
+  // model on the body of the scf.parallel. Thus it needs to be computed
+  // before the body of the scf.parallel has been manipulated.
   Value minTaskSize = computeMinTaskSize(b, op);
 
-  // Make sure that all constants will be inside the parallel operation body to
-  // reduce the number of parallel compute function arguments.
+  // Make sure that all constants will be inside the parallel operation body
+  // to reduce the number of parallel compute function arguments.
   cloneConstantsIntoTheRegion(op.getLoopBody(), rewriter);
 
   // Compute trip count for each loop induction variable:
@@ -763,11 +878,11 @@ AsyncParallelForRewrite::matchAndRewrite(scf::ParallelOp op,
   auto dispatch = [&](OpBuilder &nestedBuilder, Location loc) {
     ImplicitLocOpBuilder b(loc, nestedBuilder);
 
-    // Collect statically known constants defining the loop nest in the parallel
-    // compute function. LLVM can't always push constants across the non-trivial
-    // async dispatch call graph, by providing these values explicitly we can
-    // choose to build more efficient loop nest, and rely on a better constant
-    // folding, loop unrolling and vectorization.
+    // Collect statically known constants defining the loop nest in the
+    // parallel compute function. LLVM can't always push constants across the
+    // non-trivial async dispatch call graph, by providing these values
+    // explicitly we can choose to build more efficient loop nest, and rely on
+    // a better constant folding, loop unrolling and vectorization.
     ParallelComputeFunctionBounds staticBounds = {
         integerConstants(tripCounts),
         integerConstants(op.getLowerBound()),
@@ -775,17 +890,18 @@ AsyncParallelForRewrite::matchAndRewrite(scf::ParallelOp op,
         integerConstants(op.getStep()),
     };
 
-    // Find how many inner iteration dimensions are statically known, and their
-    // product is smaller than the `512`. We align the parallel compute block
-    // size by the product of statically known dimensions, so that we can
-    // guarantee that the inner loops executes from 0 to the loop trip counts
-    // and we can elide dynamic loop boundaries, and give LLVM an opportunity to
-    // unroll the loops. The constant `512` is arbitrary, it should depend on
-    // how many iterations LLVM will typically decide to unroll.
+    // Find how many inner iteration dimensions are statically known, and
+    // their product is smaller than the `512`. We align the parallel compute
+    // block size by the product of statically known dimensions, so that we
+    // can guarantee that the inner loops executes from 0 to the loop trip
+    // counts and we can elide dynamic loop boundaries, and give LLVM an
+    // opportunity to unroll the loops. The constant `512` is arbitrary, it
+    // should depend on how many iterations LLVM will typically decide to
+    // unroll.
     static constexpr int64_t maxUnrollableIterations = 512;
 
-    // The number of inner loops with statically known number of iterations less
-    // than the `maxUnrollableIterations` value.
+    // The number of inner loops with statically known number of iterations
+    // less than the `maxUnrollableIterations` value.
     int numUnrollableLoops = 0;
 
     auto getInt = [](IntegerAttr attr) { return attr ? attr.getInt() : 0; };
@@ -859,8 +975,16 @@ AsyncParallelForRewrite::matchAndRewrite(scf::ParallelOp op,
     Value bs1 = b.create<arith::MaxSIOp>(bs0, minTaskSize);
     Value blockSize = b.create<arith::MinSIOp>(tripCount, bs1);
 
-    // Dispatch parallel compute function using async recursive work splitting,
-    // or by submitting compute task sequentially from a caller thread.
+    ParallelComputeFunction notUnrollableParallelComputeFunction =
+        createParallelComputeFunction(op, staticBounds, 0, rewriter);
+    // add reduction memrefs
+    notUnrollableParallelComputeFunction.captures.insert(
+        notUnrollableParallelComputeFunction.captures.end(),
+        resultMemRefs.begin(), resultMemRefs.end());
+
+    // Dispatch parallel compute function using async recursive work
+    // splitting, or by submitting compute task sequentially from a caller
+    // thread.
     auto doDispatch = asyncDispatch ? doAsyncDispatch : doSequentialDispatch;
 
     // Create a parallel compute function that takes a block id and computes
@@ -883,6 +1007,10 @@ AsyncParallelForRewrite::matchAndRewrite(scf::ParallelOp op,
     auto dispatchBlockAligned = [&](OpBuilder &nestedBuilder, Location loc) {
       ParallelComputeFunction compute = createParallelComputeFunction(
           op, staticBounds, numUnrollableLoops, rewriter);
+      // add reduction memrefs
+      unrollableParallelComputeFunction.captures.insert(
+          unrollableParallelComputeFunction.captures.end(),
+          resultMemRefs.begin(), resultMemRefs.end());
 
       ImplicitLocOpBuilder b(loc, nestedBuilder);
       // Align the block size to be a multiple of the statically known
@@ -916,8 +1044,17 @@ AsyncParallelForRewrite::matchAndRewrite(scf::ParallelOp op,
   // Replace the `scf.parallel` operation with the parallel compute function.
   b.create<scf::IfOp>(TypeRange(), isZeroIterations, noOp, dispatch);
 
-  // Parallel operation was replaced with a block iteration loop.
-  rewriter.eraseOp(op);
+  // if parallel loop has no reductions, just erase loop, otherwise replace with
+  // reduction results
+  if (op.getNumResults() == 0)
+    rewriter.eraseOp(op);
+  else {
+    SmallVector<Value> loadedResults;
+    for (auto ref : resultMemRefs)
+      loadedResults.push_back(b.create<memref::LoadOp>(ref));
+
+    rewriter.replaceOp(op, loadedResults);
+  }
 
   return success();
 }
