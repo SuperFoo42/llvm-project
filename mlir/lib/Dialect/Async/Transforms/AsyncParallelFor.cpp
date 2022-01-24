@@ -836,6 +836,14 @@ AsyncParallelForRewrite::matchAndRewrite(scf::ParallelOp op,
         b.create<memref::AllocaOp>(MemRefType::get({}, ty)));
   }
 
+  //initialize memrefs
+  for (auto &en : llvm::enumerate(llvm::zip(resultMemRefs, op.getInitVals())))
+  {
+    Value memref, initVal;
+    std::tie(memref, initVal) = en.value();
+    b.create<memref::StoreOp>(initVal,memref);
+  }
+
   // Computing minTaskSize emits IR and can be implemented as executing a cost
   // model on the body of the scf.parallel. Thus it needs to be computed
   // before the body of the scf.parallel has been manipulated.
