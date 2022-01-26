@@ -35,10 +35,8 @@
 #include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCAsmLayout.h"
-#include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCDisassembler/MCDisassembler.h"
 #include "llvm/MC/MCObjectStreamer.h"
-#include "llvm/MC/MCObjectWriter.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/MC/TargetRegistry.h"
@@ -2771,7 +2769,6 @@ void RewriteInstance::buildFunctionsCFG() {
                      "Build Binary Functions", opts::TimeBuild);
 
   // Create annotation indices to allow lock-free execution
-  BC->MIB->getOrCreateAnnotationIndex("Offset");
   BC->MIB->getOrCreateAnnotationIndex("JTIndexReg");
   BC->MIB->getOrCreateAnnotationIndex("NOP");
   BC->MIB->getOrCreateAnnotationIndex("Size");

@@ -23,6 +23,7 @@
 #include "clang/Analysis/FlowSensitive/Transfer.h"
 #include "clang/Analysis/FlowSensitive/TypeErasedDataflowAnalysis.h"
 #include "clang/Analysis/FlowSensitive/Value.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/None.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/Support/raw_ostream.h"
@@ -191,10 +192,6 @@ std::vector<llvm::Optional<TypeErasedDataflowAnalysisState>>
 runTypeErasedDataflowAnalysis(const ControlFlowContext &CFCtx,
                               TypeErasedDataflowAnalysis &Analysis,
                               const Environment &InitEnv) {
-  // FIXME: Consider enforcing that `Cfg` meets the requirements that
-  // are specified in the header. This could be done by remembering
-  // what options were used to build `Cfg` and asserting on them here.
-
   PostOrderCFGView POV(&CFCtx.getCFG());
   ForwardDataflowWorklist Worklist(CFCtx.getCFG(), &POV);
 
@@ -213,8 +210,8 @@ runTypeErasedDataflowAnalysis(const ControlFlowContext &CFCtx,
   // FIXME: Consider making the maximum number of iterations configurable.
   // FIXME: Set up statistics (see llvm/ADT/Statistic.h) to count average number
   // of iterations, number of functions that time out, etc.
-  unsigned Iterations = 0;
-  static constexpr unsigned MaxIterations = 1 << 16;
+  uint32_t Iterations = 0;
+  static constexpr uint32_t MaxIterations = 1 << 16;
   while (const CFGBlock *Block = Worklist.dequeue()) {
     if (++Iterations > MaxIterations) {
       llvm::errs() << "Maximum number of iterations reached, giving up.\n";

@@ -83,6 +83,11 @@ LatticeJoinEffect Environment::join(const Environment &Other) {
   if (DeclToLocSizeBefore != DeclToLoc.size())
     Effect = LatticeJoinEffect::Changed;
 
+  const unsigned ExprToLocSizeBefore = ExprToLoc.size();
+  ExprToLoc = intersectDenseMaps(ExprToLoc, Other.ExprToLoc);
+  if (ExprToLocSizeBefore != ExprToLoc.size())
+    Effect = LatticeJoinEffect::Changed;
+
   // FIXME: Add support for joining distinct values that are assigned to the
   // same storage locations in `LocToVal` and `Other.LocToVal`.
   const unsigned LocToValSizeBefore = LocToVal.size();
@@ -95,7 +100,7 @@ LatticeJoinEffect Environment::join(const Environment &Other) {
 
 StorageLocation &Environment::createStorageLocation(QualType Type) {
   assert(!Type.isNull());
-  if (Type->isStructureOrClassType()) {
+  if (Type->isStructureOrClassType() || Type->isUnionType()) {
     // FIXME: Explore options to avoid eager initialization of fields as some of
     // them might not be needed for a particular analysis.
     llvm::DenseMap<const ValueDecl *, StorageLocation *> FieldLocs;

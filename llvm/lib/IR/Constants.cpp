@@ -739,15 +739,8 @@ static bool constantIsDead(const Constant *C, bool RemoveDeadUsers) {
       ++I;
   }
 
-  if (RemoveDeadUsers) {
-    // If C is only used by metadata, it should not be preserved but should
-    // have its uses replaced.
-    if (C->isUsedByMetadata()) {
-      const_cast<Constant *>(C)->replaceAllUsesWith(
-          UndefValue::get(C->getType()));
-    }
+  if (RemoveDeadUsers)
     const_cast<Constant *>(C)->destroyConstant();
-  }
 
   return true;
 }
@@ -1493,28 +1486,6 @@ bool ConstantExpr::isCast() const {
 
 bool ConstantExpr::isCompare() const {
   return getOpcode() == Instruction::ICmp || getOpcode() == Instruction::FCmp;
-}
-
-bool ConstantExpr::isGEPWithNoNotionalOverIndexing() const {
-  if (getOpcode() != Instruction::GetElementPtr) return false;
-
-  gep_type_iterator GEPI = gep_type_begin(this), E = gep_type_end(this);
-  User::const_op_iterator OI = std::next(this->op_begin());
-
-  // The remaining indices may be compile-time known integers within the bounds
-  // of the corresponding notional static array types.
-  for (; GEPI != E; ++GEPI, ++OI) {
-    if (isa<UndefValue>(*OI))
-      continue;
-    auto *CI = dyn_cast<ConstantInt>(*OI);
-    if (!CI || (GEPI.isBoundedSequential() &&
-                (CI->getValue().getActiveBits() > 64 ||
-                 CI->getZExtValue() >= GEPI.getSequentialNumElements())))
-      return false;
-  }
-
-  // All the indices checked out.
-  return true;
 }
 
 bool ConstantExpr::hasIndices() const {

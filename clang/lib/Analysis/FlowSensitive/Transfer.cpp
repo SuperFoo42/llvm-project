@@ -22,9 +22,11 @@
 #include "clang/AST/StmtVisitor.h"
 #include "clang/Analysis/FlowSensitive/DataflowEnvironment.h"
 #include "clang/Basic/OperatorKinds.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Casting.h"
 #include <cassert>
 #include <memory>
+#include <tuple>
 
 namespace clang {
 namespace dataflow {
@@ -182,6 +184,7 @@ public:
 
     switch (S->getOpcode()) {
     case UO_Deref: {
+      // Skip past a reference to handle dereference of a dependent pointer.
       const auto *SubExprVal = cast_or_null<PointerValue>(
           Env.getValue(*SubExpr, SkipPast::Reference));
       if (SubExprVal == nullptr)
@@ -401,6 +404,43 @@ public:
 
       Env.setStorageLocation(*S, *SubExprLoc);
     }
+  }
+
+  void VisitConditionalOperator(const ConditionalOperator *S) {
+    // FIXME: Revisit this once flow conditions are added to the framework. For
+    // `a = b ? c : d` we can add `b => a == c && !b => a == d` to the flow
+    // condition.
+    auto &Loc = Env.createStorageLocation(*S);
+    Env.setStorageLocation(*S, Loc);
+    if (Value *Val = Env.createValue(S->getType()))
+      Env.setValue(Loc, *Val);
+  }
+
+  void VisitInitListExpr(const InitListExpr *S) {
+    QualType Type = S->getType();
+
+    auto &Loc = Env.createStorageLocation(*S);
+    Env.setStorageLocation(*S, Loc);
+
+    auto *Val = Env.createValue(Type);
+    if (Val == nullptr)
+      return;
+
+    Env.setValue(Loc, *Val);
+
+    if (Type->isStructureOrClassType()) {
+      for (auto IT : llvm::zip(Type->getAsRecordDecl()->fields(), S->inits())) {
+        const FieldDecl *Field = std::get<0>(IT);
+        assert(Field != nullptr);
+
+        const Expr *Init = std::get<1>(IT);
+        assert(Init != nullptr);
+
+        if (Value *InitVal = Env.getValue(*Init, SkipPast::None))
+          cast<StructValue>(Val)->setChild(*Field, *InitVal);
+      }
+    }
+    // FIXME: Implement array initialization.
   }
 
   // FIXME: Add support for:

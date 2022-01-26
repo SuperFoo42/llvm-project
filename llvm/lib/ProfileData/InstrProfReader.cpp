@@ -383,9 +383,9 @@ Error RawInstrProfReader<IntPtrT>::readHeader(
 
   CountersDelta = swap(Header.CountersDelta);
   NamesDelta = swap(Header.NamesDelta);
-  auto NumData = swap(Header.NumData);
+  auto NumData = swap(Header.DataSize);
   auto PaddingBytesBeforeCounters = swap(Header.PaddingBytesBeforeCounters);
-  auto CountersSize = swap(Header.NumCounters) * getCounterTypeSize();
+  auto CountersSize = swap(Header.CountersSize) * getCounterTypeSize();
   auto PaddingBytesAfterCounters = swap(Header.PaddingBytesAfterCounters);
   auto NamesSize = swap(Header.NamesSize);
   ValueKindLast = swap(Header.ValueKindLast);
@@ -411,8 +411,8 @@ Error RawInstrProfReader<IntPtrT>::readHeader(
     assert(CountersDelta == 0 && NamesDelta == 0);
     Data = Correlator->getDataPointer();
     DataEnd = Data + Correlator->getDataSize();
-    NamesStart = Correlator->getCompressedNamesPointer();
-    NamesEnd = NamesStart + Correlator->getCompressedNamesSize();
+    NamesStart = Correlator->getNamesPointer();
+    NamesEnd = NamesStart + Correlator->getNamesSize();
   } else {
     Data = reinterpret_cast<const RawInstrProf::ProfileData<IntPtrT> *>(
         Start + DataOffset);
