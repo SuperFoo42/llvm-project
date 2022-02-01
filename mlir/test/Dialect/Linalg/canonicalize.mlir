@@ -54,7 +54,7 @@ func @memref_cast_into_tiled_loop(%arg0: memref<192xf32>)  {
 
 func @dce_zero_memref(%arg0 : memref<0xf32>, %arg1: tensor<0xf32>) -> tensor<0xf32> {
   // memref<0x32> is expected to be dce'ed
-  linalg.copy(%arg0, %arg0): memref<0xf32>, memref<0xf32>
+  memref.copy %arg0, %arg0 : memref<0xf32> to memref<0xf32>
 
   // tensor<0xf32> cannot be dce'ed
   %1 = linalg.generic #trait outs(%arg1 : tensor<0xf32>) {
@@ -67,7 +67,7 @@ func @dce_zero_memref(%arg0 : memref<0xf32>, %arg1: tensor<0xf32>) -> tensor<0xf
 // CHECK-LABEL: @dce_zero_memref
 //  CHECK-SAME:   %[[ARG0:[a-zA-Z0-9_]+]]: memref<0xf32>
 //  CHECK-SAME:   %[[ARG1:[a-zA-Z0-9_]+]]: tensor<0xf32>
-//   CHECK-NOT:   linalg.copy
+//   CHECK-NOT:   memref.copy
 //  CHECK-NEXT:   return %[[ARG1]]
 
 // -----
@@ -330,22 +330,8 @@ func @propogate_casts(%arg0 : tensor<?x?xf32>, %arg1 : f32, %arg2 : index,
 // CHECK-LABEL: @self_copy
 func @self_copy(%arg0 : memref<2x3x?x4xf32>) {
 
-//   CHECK-NOT: linalg.copy
-  linalg.copy(%arg0, %arg0): memref<2x3x?x4xf32>, memref<2x3x?x4xf32>
-
-//   CHECK: return
-  return
-}
-
-// -----
-
-// CHECK-LABEL: @self_copy_with_permutation
-func @self_copy_with_permutation(%arg0 : memref<2x3x?x4xf32>) {
-
-//   CHECK: linalg.copy
-  linalg.copy(%arg0, %arg0)
-    {inputPermutation = affine_map<(i, j, k, l) -> (j, k, i, l)>,
-     outputPermuation = affine_map<(i, j, k, l) -> (i, j, k, l)>} : memref<2x3x?x4xf32>, memref<2x3x?x4xf32>
+//   CHECK-NOT: memref.copy
+  memref.copy %arg0, %arg0 : memref<2x3x?x4xf32> to memref<2x3x?x4xf32>
 
 //   CHECK: return
   return
@@ -582,4 +568,20 @@ func @dim_of_tiled_loop_result_no_canonicalize(%arg0: tensor<?x?xf32>, %arg1: te
   }
   %r2 = tensor.dim %r, %c0 : tensor<?x?xf32>
   return %r2 : index
+}
+
+// -----
+
+// CHECK: func @fold_self_copy
+func @fold_self_copy(%0 : memref<4x16xf32>) {
+// CHECK-NEXT: return
+  linalg.generic {indexing_maps = [affine_map<(d0, d1) -> (d0, d1)>, 
+                                   affine_map<(d0, d1) -> (d0, d1)>], 
+                  iterator_types = ["parallel", "parallel"]} 
+    ins(%0 : memref<4x16xf32>) 
+    outs(%0 : memref<4x16xf32>) {
+      ^bb0(%arg4: f32, %arg5: f32):
+        linalg.yield %arg4 : f32
+    }
+  return 
 }

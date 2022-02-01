@@ -5423,6 +5423,7 @@ SDValue SITargetLowering::lowerTRAP(SDValue Op, SelectionDAG &DAG) const {
     case ELF::ELFABIVERSION_AMDGPU_HSA_V3:
       return lowerTrapHsaQueuePtr(Op, DAG);
     case ELF::ELFABIVERSION_AMDGPU_HSA_V4:
+    case ELF::ELFABIVERSION_AMDGPU_HSA_V5:
       return Subtarget->supportsGetDoorbellID() ?
           lowerTrapHsa(Op, DAG) : lowerTrapHsaQueuePtr(Op, DAG);
     }
@@ -5630,6 +5631,15 @@ SDValue SITargetLowering::lowerADDRSPACECAST(SDValue Op,
       return DAG.getNode(ISD::SELECT, SL, MVT::i64, NonNull, CvtPtr,
                          FlatNullPtr);
     }
+  }
+
+  if (SrcAS == AMDGPUAS::CONSTANT_ADDRESS_32BIT &&
+      Op.getValueType() == MVT::i64) {
+    const SIMachineFunctionInfo *Info =
+        DAG.getMachineFunction().getInfo<SIMachineFunctionInfo>();
+    SDValue Hi = DAG.getConstant(Info->get32BitAddressHighBits(), SL, MVT::i32);
+    SDValue Vec = DAG.getNode(ISD::BUILD_VECTOR, SL, MVT::v2i32, Src, Hi);
+    return DAG.getNode(ISD::BITCAST, SL, MVT::i64, Vec);
   }
 
   if (ASC->getDestAddressSpace() == AMDGPUAS::CONSTANT_ADDRESS_32BIT &&
@@ -9639,6 +9649,9 @@ SDValue SITargetLowering::performOrCombine(SDNode *N,
 
 SDValue SITargetLowering::performXorCombine(SDNode *N,
                                             DAGCombinerInfo &DCI) const {
+  if (SDValue RV = reassociateScalarOps(N, DCI.DAG))
+    return RV;
+
   EVT VT = N->getValueType(0);
   if (VT != MVT::i64)
     return SDValue();
@@ -10551,6 +10564,9 @@ SDValue SITargetLowering::reassociateScalarOps(SDNode *N,
   if (VT != MVT::i32 && VT != MVT::i64)
     return SDValue();
 
+  if (DAG.isBaseWithConstantOffset(SDValue(N, 0)))
+    return SDValue();
+
   unsigned Opc = N->getOpcode();
   SDValue Op0 = N->getOperand(0);
   SDValue Op1 = N->getOperand(1);
@@ -10571,12 +10587,6 @@ SDValue SITargetLowering::reassociateScalarOps(SDNode *N,
 
   if (Op1->isDivergent())
     std::swap(Op1, Op2);
-
-  // If either operand is constant this will conflict with
-  // DAGCombiner::ReassociateOps().
-  if (DAG.isConstantIntBuildVectorOrConstantInt(Op0) ||
-      DAG.isConstantIntBuildVectorOrConstantInt(Op1))
-    return SDValue();
 
   SDLoc SL(N);
   SDValue Add1 = DAG.getNode(Opc, SL, VT, Op0, Op1);
@@ -12577,4 +12587,28 @@ SITargetLowering::getTypeLegalizationCost(const DataLayout &DL,
 
   Cost.first += (Size + 255) / 256;
   return Cost;
+}
+
+bool SITargetLowering::hasMemSDNodeUser(SDNode *N) const {
+  SDNode::use_iterator I = N->use_begin(), E = N->use_end();
+  for (; I != E; ++I) {
+    if (MemSDNode *M = dyn_cast<MemSDNode>(*I)) {
+      if (getBasePtrIndex(M) == I.getOperandNo())
+        return true;
+    }
+  }
+  return false;
+}
+
+bool SITargetLowering::isReassocProfitable(SelectionDAG &DAG, SDValue N0,
+                                           SDValue N1) const {
+  if (!N0.hasOneUse())
+    return false;
+  // Take care of the oportunity to keep N0 uniform
+  if (N0->isDivergent() || !N1->isDivergent())
+    return true;
+  // Check if we have a good chance to form the memory access pattern with the
+  // base and offset
+  return (DAG.isBaseWithConstantOffset(N0) &&
+          hasMemSDNodeUser(*N0->use_begin()));
 }

@@ -6,8 +6,10 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Generic itanium demangler library. This file has two byte-per-byte identical
-// copies in the source tree, one in libcxxabi, and the other in llvm.
+// Generic itanium demangler library.
+// There are two copies of this file in the source tree.  The one under
+// libcxxabi is the original and the one under llvm is the copy.  Use
+// cp-to-llvm.sh to update the copy.  See README.txt for more details.
 //
 //===----------------------------------------------------------------------===//
 
@@ -5448,37 +5450,34 @@ Node *AbstractManglingParser<Derived, Alloc>::parseSubstitution() {
     return nullptr;
 
   if (look() >= 'a' && look() <= 'z') {
-    Node *SpecialSub;
+    SpecialSubKind Kind;
     switch (look()) {
     case 'a':
-      ++First;
-      SpecialSub = make<SpecialSubstitution>(SpecialSubKind::allocator);
+      Kind = SpecialSubKind::allocator;
       break;
     case 'b':
-      ++First;
-      SpecialSub = make<SpecialSubstitution>(SpecialSubKind::basic_string);
-      break;
-    case 's':
-      ++First;
-      SpecialSub = make<SpecialSubstitution>(SpecialSubKind::string);
-      break;
-    case 'i':
-      ++First;
-      SpecialSub = make<SpecialSubstitution>(SpecialSubKind::istream);
-      break;
-    case 'o':
-      ++First;
-      SpecialSub = make<SpecialSubstitution>(SpecialSubKind::ostream);
+      Kind = SpecialSubKind::basic_string;
       break;
     case 'd':
-      ++First;
-      SpecialSub = make<SpecialSubstitution>(SpecialSubKind::iostream);
+      Kind = SpecialSubKind::iostream;
+      break;
+    case 'i':
+      Kind = SpecialSubKind::istream;
+      break;
+    case 'o':
+      Kind = SpecialSubKind::ostream;
+      break;
+    case 's':
+      Kind = SpecialSubKind::string;
       break;
     default:
       return nullptr;
     }
+    ++First;
+    auto *SpecialSub = make<SpecialSubstitution>(Kind);
     if (!SpecialSub)
       return nullptr;
+
     // Itanium C++ ABI 5.1.2: If a name that would use a built-in <substitution>
     // has ABI tags, the tags are appended to the substitution; the result is a
     // substitutable component.
