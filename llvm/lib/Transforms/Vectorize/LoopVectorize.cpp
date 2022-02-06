@@ -1701,6 +1701,11 @@ public:
 private:
   unsigned NumPredStores = 0;
 
+  /// Convenience function that returns the value of vscale_range iff
+  /// vscale_range.min == vscale_range.max or otherwise returns the value
+  /// returned by the corresponding TLI method.
+  Optional<unsigned> getVScaleForTuning() const;
+
   /// \return An upper bound for the vectorization factors for both
   /// fixed and scalable vectorization, where the minimum-known number of
   /// elements is a power-of-2 larger than zero. If scalable vectorization is
@@ -2940,7 +2945,8 @@ void InnerLoopVectorizer::scalarizeInstruction(Instruction *Instr,
   for (auto &I : enumerate(RepRecipe->operands())) {
     auto InputInstance = Instance;
     VPValue *Operand = I.value();
-    if (State.Plan->isUniformAfterVectorization(Operand))
+    VPReplicateRecipe *OperandR = dyn_cast<VPReplicateRecipe>(Operand);
+    if (OperandR && OperandR->isUniform())
       InputInstance.Lane = VPLane::getFirstLane();
     Cloned->setOperand(I.index(), State.get(Operand, InputInstance));
   }
@@ -5600,6 +5606,18 @@ ElementCount LoopVectorizationCostModel::getMaximizedVFForTarget(
   return MaxVF;
 }
 
+Optional<unsigned> LoopVectorizationCostModel::getVScaleForTuning() const {
+  if (TheFunction->hasFnAttribute(Attribute::VScaleRange)) {
+    auto Attr = TheFunction->getFnAttribute(Attribute::VScaleRange);
+    auto Min = Attr.getVScaleRangeMin();
+    auto Max = Attr.getVScaleRangeMax();
+    if (Max && Min == Max)
+      return Max;
+  }
+
+  return TTI.getVScaleForTuning();
+}
+
 bool LoopVectorizationCostModel::isMoreProfitable(
     const VectorizationFactor &A, const VectorizationFactor &B) const {
   InstructionCost CostA = A.Cost;
@@ -5624,7 +5642,7 @@ bool LoopVectorizationCostModel::isMoreProfitable(
   // Improve estimate for the vector width if it is scalable.
   unsigned EstimatedWidthA = A.Width.getKnownMinValue();
   unsigned EstimatedWidthB = B.Width.getKnownMinValue();
-  if (Optional<unsigned> VScale = TTI.getVScaleForTuning()) {
+  if (Optional<unsigned> VScale = getVScaleForTuning()) {
     if (A.Width.isScalable())
       EstimatedWidthA *= VScale.getValue();
     if (B.Width.isScalable())
@@ -5673,7 +5691,7 @@ VectorizationFactor LoopVectorizationCostModel::selectVectorizationFactor(
 
 #ifndef NDEBUG
     unsigned AssumedMinimumVscale = 1;
-    if (Optional<unsigned> VScale = TTI.getVScaleForTuning())
+    if (Optional<unsigned> VScale = getVScaleForTuning())
       AssumedMinimumVscale = VScale.getValue();
     unsigned Width =
         Candidate.Width.isScalable()
@@ -5826,7 +5844,9 @@ bool LoopVectorizationCostModel::isEpilogueVectorizationProfitable(
   // consider interleaving beneficial (eg. MVE).
   if (TTI.getMaxInterleaveFactor(VF.getKnownMinValue()) <= 1)
     return false;
-  if (VF.getFixedValue() >= EpilogueVectorizationMinVF)
+  // FIXME: We should consider changing the threshold for scalable
+  // vectors to take VScaleForTuning into account.
+  if (VF.getKnownMinValue() >= EpilogueVectorizationMinVF)
     return true;
   return false;
 }
@@ -5877,29 +5897,33 @@ LoopVectorizationCostModel::selectEpilogueVectorizationFactor(
     return Result;
   }
 
-  auto FixedMainLoopVF = ElementCount::getFixed(MainLoopVF.getKnownMinValue());
-  if (MainLoopVF.isScalable())
-    LLVM_DEBUG(
-        dbgs() << "LEV: Epilogue vectorization using scalable vectors not "
-                  "yet supported. Converting to fixed-width (VF="
-               << FixedMainLoopVF << ") instead\n");
-
-  if (!isEpilogueVectorizationProfitable(FixedMainLoopVF)) {
+  if (!isEpilogueVectorizationProfitable(MainLoopVF)) {
     LLVM_DEBUG(dbgs() << "LEV: Epilogue vectorization is not profitable for "
                          "this loop\n");
     return Result;
   }
 
+  // If MainLoopVF = vscale x 2, and vscale is expected to be 4, then we know
+  // the main loop handles 8 lanes per iteration. We could still benefit from
+  // vectorizing the epilogue loop with VF=4.
+  ElementCount EstimatedRuntimeVF = MainLoopVF;
+  if (MainLoopVF.isScalable()) {
+    EstimatedRuntimeVF = ElementCount::getFixed(MainLoopVF.getKnownMinValue());
+    if (Optional<unsigned> VScale = getVScaleForTuning())
+      EstimatedRuntimeVF *= VScale.getValue();
+  }
+
   for (auto &NextVF : ProfitableVFs)
-    if (ElementCount::isKnownLT(NextVF.Width, FixedMainLoopVF) &&
-        (Result.Width.getFixedValue() == 1 ||
-         isMoreProfitable(NextVF, Result)) &&
+    if (((!NextVF.Width.isScalable() && MainLoopVF.isScalable() &&
+          ElementCount::isKnownLT(NextVF.Width, EstimatedRuntimeVF)) ||
+         ElementCount::isKnownLT(NextVF.Width, MainLoopVF)) &&
+        (Result.Width.isScalar() || isMoreProfitable(NextVF, Result)) &&
         LVP.hasPlanWithVF(NextVF.Width))
       Result = NextVF;
 
   if (Result != VectorizationFactor::Disabled())
     LLVM_DEBUG(dbgs() << "LEV: Vectorizing epilogue loop with VF = "
-                      << Result.Width.getFixedValue() << "\n";);
+                      << Result.Width << "\n";);
   return Result;
 }
 
