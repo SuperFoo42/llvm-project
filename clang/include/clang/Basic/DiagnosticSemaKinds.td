@@ -1651,6 +1651,9 @@ def warn_weak_vtable : Warning<
   "%0 has no out-of-line virtual method definitions; its vtable will be "
   "emitted in every translation unit">,
   InGroup<DiagGroup<"weak-vtables">>, DefaultIgnore;
+def warn_weak_template_vtable : Warning<
+  "this warning is no longer in use and will be removed in the next release">,
+  InGroup<DiagGroup<"weak-template-vtables">>, DefaultIgnore;
 
 def ext_using_undefined_std : ExtWarn<
   "using directive refers to implicitly-defined namespace 'std'">;
@@ -11119,6 +11122,10 @@ def err_coroutine_promise_final_suspend_requires_nothrow : Error<
 def note_coroutine_function_declare_noexcept : Note<
   "must be declared with 'noexcept'"
 >;
+def warn_always_inline_coroutine : Warning<
+  "this coroutine may be split into pieces; not every piece is guaranteed to be inlined"
+  >,
+  InGroup<AlwaysInlineCoroutine>;
 } // end of coroutines issue category
 
 let CategoryName = "Documentation Issue" in {
