@@ -328,7 +328,7 @@ static void getTargetFeatures(const Driver &D, const llvm::Triple &Triple,
   case llvm::Triple::armeb:
   case llvm::Triple::thumb:
   case llvm::Triple::thumbeb:
-    arm::getARMTargetFeatures(D, Triple, Args, CmdArgs, Features, ForAS);
+    arm::getARMTargetFeatures(D, Triple, Args, Features, ForAS);
     break;
 
   case llvm::Triple::ppc:
@@ -347,8 +347,7 @@ static void getTargetFeatures(const Driver &D, const llvm::Triple &Triple,
   case llvm::Triple::aarch64:
   case llvm::Triple::aarch64_32:
   case llvm::Triple::aarch64_be:
-    aarch64::getAArch64TargetFeatures(D, Triple, Args, CmdArgs, Features,
-                                      ForAS);
+    aarch64::getAArch64TargetFeatures(D, Triple, Args, Features, ForAS);
     break;
   case llvm::Triple::x86:
   case llvm::Triple::x86_64:
@@ -1150,7 +1149,8 @@ static const char *RelocationModelName(llvm::Reloc::Model Model) {
 }
 static void handleAMDGPUCodeObjectVersionOptions(const Driver &D,
                                                  const ArgList &Args,
-                                                 ArgStringList &CmdArgs) {
+                                                 ArgStringList &CmdArgs,
+                                                 bool IsCC1As = false) {
   // If no version was requested by the user, use the default value from the
   // back end. This is consistent with the value returned from
   // getAMDGPUCodeObjectVersion. This lets clang emit IR for amdgpu without
@@ -1162,6 +1162,11 @@ static void handleAMDGPUCodeObjectVersionOptions(const Driver &D,
                    Args.MakeArgString(Twine("--amdhsa-code-object-version=") +
                                       Twine(CodeObjVer)));
     CmdArgs.insert(CmdArgs.begin() + 1, "-mllvm");
+    // -cc1as does not accept -mcode-object-version option.
+    if (!IsCC1As)
+      CmdArgs.insert(CmdArgs.begin() + 1,
+                     Args.MakeArgString(Twine("-mcode-object-version=") +
+                                        Twine(CodeObjVer)));
   }
 }
 
@@ -1625,6 +1630,16 @@ void RenderARMABI(const Driver &D, const llvm::Triple &Triple,
   CmdArgs.push_back("-target-abi");
   CmdArgs.push_back(ABIName);
 }
+
+void AddUnalignedAccessWarning(ArgStringList &CmdArgs) {
+  auto StrictAlignIter =
+      std::find_if(CmdArgs.rbegin(), CmdArgs.rend(), [](StringRef Arg) {
+        return Arg == "+strict-align" || Arg == "-strict-align";
+      });
+  if (StrictAlignIter != CmdArgs.rend() &&
+      StringRef(*StrictAlignIter) == "+strict-align")
+    CmdArgs.push_back("-Wunaligned-access");
+}
 }
 
 static void CollectARMPACBTIOptions(const ToolChain &TC, const ArgList &Args,
@@ -1639,7 +1654,7 @@ static void CollectARMPACBTIOptions(const ToolChain &TC, const ArgList &Args,
   const Driver &D = TC.getDriver();
   const llvm::Triple &Triple = TC.getEffectiveTriple();
   if (!(isAArch64 || (Triple.isArmT32() && Triple.isArmMClass())))
-    D.Diag(diag::warn_target_unsupported_branch_protection_option)
+    D.Diag(diag::warn_incompatible_branch_protection_option)
         << Triple.getArchName();
 
   StringRef Scope, Key;
@@ -1720,6 +1735,8 @@ void Clang::AddARMTargetArgs(const llvm::Triple &Triple, const ArgList &Args,
 
   // Enable/disable return address signing and indirect branch targets.
   CollectARMPACBTIOptions(getToolChain(), Args, CmdArgs, false /*isAArch64*/);
+
+  AddUnalignedAccessWarning(CmdArgs);
 }
 
 void Clang::RenderTargetOptions(const llvm::Triple &EffectiveTriple,
@@ -1893,6 +1910,8 @@ void Clang::AddAArch64TargetArgs(const ArgList &Args,
       CmdArgs.push_back(Args.MakeArgString(TuneCPU));
     }
   }
+
+  AddUnalignedAccessWarning(CmdArgs);
 }
 
 void Clang::AddMIPSTargetArgs(const ArgList &Args,
@@ -5888,6 +5907,16 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   Args.AddLastArg(CmdArgs, options::OPT_fdigraphs, options::OPT_fno_digraphs);
   Args.AddLastArg(CmdArgs, options::OPT_femulated_tls,
                   options::OPT_fno_emulated_tls);
+  Args.AddLastArg(CmdArgs, options::OPT_fzero_call_used_regs_EQ);
+
+  if (Arg *A = Args.getLastArg(options::OPT_fzero_call_used_regs_EQ)) {
+    // FIXME: There's no reason for this to be restricted to X86. The backend
+    // code needs to be changed to include the appropriate function calls
+    // automatically.
+    if (!Triple.isX86())
+      D.Diag(diag::err_drv_unsupported_opt_for_target)
+          << A->getAsString(Args) << TripleStr;
+  }
 
   // AltiVec-like language extensions aren't relevant for assembling.
   if (!isa<PreprocessJobAction>(JA) || Output.getType() != types::TY_PP_Asm)
@@ -7460,6 +7489,16 @@ void Clang::AddClangCLArgs(const ArgList &Args, types::ID InputType,
   }
 
   const Driver &D = getToolChain().getDriver();
+
+  // This controls whether or not we perform JustMyCode instrumentation.
+  if (Args.hasFlag(options::OPT__SLASH_JMC, options::OPT__SLASH_JMC_,
+                   /*Default=*/false)) {
+    if (*EmitCodeView && *DebugInfoKind >= codegenoptions::DebugInfoConstructor)
+      CmdArgs.push_back("-fjmc");
+    else
+      D.Diag(clang::diag::warn_drv_jmc_requires_debuginfo);
+  }
+
   EHFlags EH = parseClangCLEHFlags(D, Args);
   if (!isNVPTX && (EH.Synch || EH.Asynch)) {
     if (types::isCXX(InputType))
@@ -7891,7 +7930,7 @@ void ClangAs::ConstructJob(Compilation &C, const JobAction &JA,
   }
 
   if (Triple.isAMDGPU())
-    handleAMDGPUCodeObjectVersionOptions(D, Args, CmdArgs);
+    handleAMDGPUCodeObjectVersionOptions(D, Args, CmdArgs, /*IsCC1As=*/true);
 
   assert(Input.isFilename() && "Invalid input.");
   CmdArgs.push_back(Input.getFilename());

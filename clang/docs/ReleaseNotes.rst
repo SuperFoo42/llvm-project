@@ -75,8 +75,16 @@ New Pragmas in Clang
 Attribute Changes in Clang
 --------------------------
 
+- Added support for parameter pack expansion in `clang::annotate`.
+
 Windows Support
 ---------------
+
+- Add support for MSVC-compatible ``/JMC``/``/JMC-`` flag in clang-cl (supports
+  X86/X64/ARM/ARM64). ``/JMC`` could only be used when ``/Zi`` or ``/Z7`` is
+  turned on. With this addition, clang-cl can be used in Visual Studio for the
+  JustMyCode feature. Note, you may need to manually add ``/JMC`` as additional
+  compile options in the Visual Studio since it currently assumes clang-cl does not support ``/JMC``.
 
 C Language Changes in Clang
 ---------------------------
@@ -91,6 +99,8 @@ C++20 Feature Support
 
 C++2b Feature Support
 ^^^^^^^^^^^^^^^^^^^^^
+
+- Implemented `P2128R6: Multidimensional subscript operator <https://wg21.link/P2128R6>`_.
 
 CUDA Language Changes in Clang
 ------------------------------
@@ -141,6 +151,12 @@ Floating Point Support in Clang
 
 Internal API Changes
 --------------------
+
+- Added a new attribute flag `AcceptsExprPack` that when set allows expression
+  pack expansions in the parsed arguments of the corresponding attribute.
+  Additionally it introduces delaying of attribute arguments, adding common
+  handling for creating attributes that cannot be fully initialized prior to
+  template instantiation.
 
 Build System Changes
 --------------------
