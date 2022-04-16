@@ -2405,7 +2405,9 @@ public:
       Word("!$OMP SECTION");
       Put("\n");
       EndOpenMP();
-      Walk(y, ""); // y is Block
+      // y.u is an OpenMPSectionConstruct
+      // (y.u).v is Block
+      Walk(std::get<OpenMPSectionConstruct>(y.u).v, "");
     }
   }
   void Unparse(const OpenMPSectionsConstruct &x) {
@@ -2731,12 +2733,18 @@ void UnparseVisitor::Word(const char *str) {
 
 void UnparseVisitor::Word(const std::string &str) { Word(str.c_str()); }
 
-void Unparse(llvm::raw_ostream &out, const Program &program, Encoding encoding,
+template <typename A>
+void Unparse(llvm::raw_ostream &out, const A &root, Encoding encoding,
     bool capitalizeKeywords, bool backslashEscapes,
     preStatementType *preStatement, AnalyzedObjectsAsFortran *asFortran) {
   UnparseVisitor visitor{out, 1, encoding, capitalizeKeywords, backslashEscapes,
       preStatement, asFortran};
-  Walk(program, visitor);
+  Walk(root, visitor);
   visitor.Done();
 }
+
+template void Unparse<Program>(llvm::raw_ostream &, const Program &, Encoding,
+    bool, bool, preStatementType *, AnalyzedObjectsAsFortran *);
+template void Unparse<Expr>(llvm::raw_ostream &, const Expr &, Encoding, bool,
+    bool, preStatementType *, AnalyzedObjectsAsFortran *);
 } // namespace Fortran::parser

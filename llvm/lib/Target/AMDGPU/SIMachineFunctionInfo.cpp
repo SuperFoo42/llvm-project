@@ -187,6 +187,12 @@ SIMachineFunctionInfo::SIMachineFunctionInfo(const MachineFunction &MF)
   S = F.getFnAttribute("amdgpu-gds-size").getValueAsString();
   if (!S.empty())
     S.consumeInteger(0, GDSSize);
+
+  // On GFX908, in order to guarantee copying between AGPRs, we need a scratch
+  // VGPR available at all times.
+  if (ST.hasMAIInsts() && !ST.hasGFX90AInsts()) {
+    VGPRForAGPRCopy = AMDGPU::VGPR_32RegClass.getRegister(32);
+  }
 }
 
 void SIMachineFunctionInfo::limitOccupancy(const MachineFunction &MF) {
@@ -327,7 +333,7 @@ bool SIMachineFunctionInfo::allocateSGPRSpillToVGPR(MachineFunction &MF,
 
       SpillVGPRs.push_back(SGPRSpillVGPR(LaneVGPR, SpillFI));
 
-      // Add this register as live-in to all blocks to avoid machine verifer
+      // Add this register as live-in to all blocks to avoid machine verifier
       // complaining about use of an undefined physical register.
       for (MachineBasicBlock &BB : MF)
         BB.addLiveIn(LaneVGPR);

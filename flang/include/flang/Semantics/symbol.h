@@ -24,6 +24,9 @@
 namespace llvm {
 class raw_ostream;
 }
+namespace Fortran::parser {
+struct Expr;
+}
 
 namespace Fortran::semantics {
 
@@ -94,6 +97,9 @@ public:
   void add_alternateReturn() { dummyArgs_.push_back(nullptr); }
   const MaybeExpr &stmtFunction() const { return stmtFunction_; }
   void set_stmtFunction(SomeExpr &&expr) { stmtFunction_ = std::move(expr); }
+  Symbol *moduleInterface() { return moduleInterface_; }
+  const Symbol *moduleInterface() const { return moduleInterface_; }
+  void set_moduleInterface(Symbol &);
 
 private:
   bool isInterface_{false}; // true if this represents an interface-body
@@ -102,6 +108,11 @@ private:
   Symbol *result_{nullptr};
   Scope *entryScope_{nullptr}; // if ENTRY, points to subprogram's scope
   MaybeExpr stmtFunction_;
+  // For MODULE FUNCTION or SUBROUTINE, this is the symbol of its declared
+  // interface.  For MODULE PROCEDURE, this is the declared interface if it
+  // appeared in an ancestor (sub)module.
+  Symbol *moduleInterface_{nullptr};
+
   friend llvm::raw_ostream &operator<<(
       llvm::raw_ostream &, const SubprogramDetails &);
 };
@@ -182,6 +193,12 @@ public:
   MaybeExpr &init() { return init_; }
   const MaybeExpr &init() const { return init_; }
   void set_init(MaybeExpr &&expr) { init_ = std::move(expr); }
+  const parser::Expr *unanalyzedPDTComponentInit() const {
+    return unanalyzedPDTComponentInit_;
+  }
+  void set_unanalyzedPDTComponentInit(const parser::Expr *expr) {
+    unanalyzedPDTComponentInit_ = expr;
+  }
   ArraySpec &shape() { return shape_; }
   const ArraySpec &shape() const { return shape_; }
   ArraySpec &coshape() { return coshape_; }
@@ -203,6 +220,7 @@ public:
 
 private:
   MaybeExpr init_;
+  const parser::Expr *unanalyzedPDTComponentInit_{nullptr};
   ArraySpec shape_;
   ArraySpec coshape_;
   const Symbol *commonBlock_{nullptr}; // common block this object is in
@@ -423,6 +441,7 @@ struct GenericKind {
   bool IsIntrinsicOperator() const;
   bool IsOperator() const;
   std::string ToString() const;
+  static SourceName AsFortran(DefinedIo);
   std::variant<OtherKind, common::NumericOperator, common::LogicalOperator,
       common::RelationalOperator, DefinedIo>
       u;
@@ -506,7 +525,10 @@ public:
       LocalityShared, // named in SHARED locality-spec
       InDataStmt, // initialized in a DATA statement, =>object, or /init/
       InNamelist, // in a Namelist group
-      CompilerCreated,
+      CompilerCreated, // A compiler created symbol
+      // For compiler created symbols that are constant but cannot legally have
+      // the PARAMETER attribute.
+      ReadOnly,
       // OpenACC data-sharing attribute
       AccPrivate, AccFirstPrivate, AccShared,
       // OpenACC data-mapping attribute
@@ -627,6 +649,10 @@ public:
             [](const UseDetails &x) { return x.symbol().Rank(); },
             [](const HostAssocDetails &x) { return x.symbol().Rank(); },
             [](const ObjectEntityDetails &oed) { return oed.shape().Rank(); },
+            [](const ProcEntityDetails &ped) {
+              const Symbol *iface{ped.interface().symbol()};
+              return iface ? iface->Rank() : 0;
+            },
             [](const AssocEntityDetails &aed) {
               if (const auto &expr{aed.expr()}) {
                 if (auto assocRank{aed.rank()}) {

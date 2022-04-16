@@ -12,6 +12,7 @@
 #include "flang/Evaluate/tools.h"
 #include "flang/Parser/message.h"
 #include "flang/Parser/parsing.h"
+#include "flang/Parser/unparse.h"
 #include "flang/Semantics/scope.h"
 #include "flang/Semantics/semantics.h"
 #include "flang/Semantics/symbol.h"
@@ -45,7 +46,8 @@ struct ModHeader {
 static std::optional<SourceName> GetSubmoduleParent(const parser::Program &);
 static void CollectSymbols(const Scope &, SymbolVector &, SymbolVector &);
 static void PutPassName(llvm::raw_ostream &, const std::optional<SourceName> &);
-static void PutInit(llvm::raw_ostream &, const Symbol &, const MaybeExpr &);
+static void PutInit(llvm::raw_ostream &, const Symbol &, const MaybeExpr &,
+    const parser::Expr *);
 static void PutInit(llvm::raw_ostream &, const MaybeIntExpr &);
 static void PutBound(llvm::raw_ostream &, const Bound &);
 static void PutShapeSpec(llvm::raw_ostream &, const ShapeSpec &);
@@ -322,7 +324,12 @@ void ModFileWriter::PutSymbol(
                  },
                  [](const HostAssocDetails &) {},
                  [](const MiscDetails &) {},
-                 [&](const auto &) { PutEntity(decls_, symbol); },
+                 [&](const auto &) {
+                   PutEntity(decls_, symbol);
+                   if (symbol.test(Symbol::Flag::OmpThreadprivate)) {
+                     decls_ << "!$omp threadprivate(" << symbol.name() << ")\n";
+                   }
+                 },
              },
       symbol.details());
 }
@@ -394,7 +401,7 @@ void ModFileWriter::PutDECStructure(
         }
         decls_ << ref->name();
         PutShape(decls_, object->shape(), '(', ')');
-        PutInit(decls_, *ref, object->init());
+        PutInit(decls_, *ref, object->init(), nullptr);
         emittedDECFields_.insert(*ref);
       } else if (any) {
         break; // any later use of this structure will use RECORD/str/
@@ -656,7 +663,7 @@ void ModFileWriter::PutObjectEntity(
       symbol.attrs());
   PutShape(os, details.shape(), '(', ')');
   PutShape(os, details.coshape(), '[', ']');
-  PutInit(os, symbol, details.init());
+  PutInit(os, symbol, details.init(), details.unanalyzedPDTComponentInit());
   os << '\n';
 }
 
@@ -710,13 +717,14 @@ void ModFileWriter::PutTypeParam(llvm::raw_ostream &os, const Symbol &symbol) {
   os << '\n';
 }
 
-void PutInit(
-    llvm::raw_ostream &os, const Symbol &symbol, const MaybeExpr &init) {
-  if (init) {
-    if (symbol.attrs().test(Attr::PARAMETER) ||
-        symbol.owner().IsDerivedType()) {
-      os << (symbol.attrs().test(Attr::POINTER) ? "=>" : "=");
-      init->AsFortran(os);
+void PutInit(llvm::raw_ostream &os, const Symbol &symbol, const MaybeExpr &init,
+    const parser::Expr *unanalyzed) {
+  if (symbol.attrs().test(Attr::PARAMETER) || symbol.owner().IsDerivedType()) {
+    const char *assign{symbol.attrs().test(Attr::POINTER) ? "=>" : "="};
+    if (unanalyzed) {
+      parser::Unparse(os << assign, *unanalyzed);
+    } else if (init) {
+      init->AsFortran(os << assign);
     }
   }
 }
@@ -925,6 +933,7 @@ Scope *ModFileReader::Read(const SourceName &name,
   parser::Options options;
   options.isModuleFile = true;
   options.features.Enable(common::LanguageFeature::BackslashEscapes);
+  options.features.Enable(common::LanguageFeature::OpenMP);
   if (!isIntrinsic.value_or(false)) {
     options.searchDirectories = context_.searchDirectories();
     // If a directory is in both lists, the intrinsic module directory
@@ -946,14 +955,15 @@ Scope *ModFileReader::Read(const SourceName &name,
       for (auto &msg : parsing.messages().messages()) {
         std::string str{msg.ToString()};
         Say(name, ancestorName,
-            parser::MessageFixedText{str.c_str(), str.size()}, path);
+            parser::MessageFixedText{str.c_str(), str.size(), msg.severity()},
+            path);
       }
     }
     return nullptr;
   }
   CHECK(sourceFile);
   if (!VerifyHeader(sourceFile->content())) {
-    Say(name, ancestorName, "File has invalid checksum: %s"_en_US,
+    Say(name, ancestorName, "File has invalid checksum: %s"_warn_en_US,
         sourceFile->path());
     return nullptr;
   }
@@ -1043,7 +1053,41 @@ void SubprogramSymbolCollector::Collect() {
   for (const auto &pair : scope_) {
     const Symbol &symbol{*pair.second};
     if (const auto *useDetails{symbol.detailsIf<UseDetails>()}) {
-      if (useSet_.count(useDetails->symbol().GetUltimate()) > 0) {
+      const Symbol &ultimate{useDetails->symbol().GetUltimate()};
+      bool needed{useSet_.count(ultimate) > 0};
+      if (const auto *generic{ultimate.detailsIf<GenericDetails>()}) {
+        // The generic may not be needed itself, but the specific procedure
+        // &/or derived type that it shadows may be needed.
+        const Symbol *spec{generic->specific()};
+        const Symbol *dt{generic->derivedType()};
+        needed = needed || (spec && useSet_.count(*spec) > 0) ||
+            (dt && useSet_.count(*dt) > 0);
+      }
+      if (needed) {
+        need_.push_back(symbol);
+      }
+    } else if (symbol.has<SubprogramDetails>()) {
+      // An internal subprogram is needed if it is used as interface
+      // for a dummy or return value procedure.
+      bool needed{false};
+      const auto hasInterface{[&symbol](const Symbol *s) -> bool {
+        // Is 's' a procedure with interface 'symbol'?
+        if (s) {
+          if (const auto *sDetails{s->detailsIf<ProcEntityDetails>()}) {
+            const ProcInterface &sInterface{sDetails->interface()};
+            if (sInterface.symbol() == &symbol) {
+              return true;
+            }
+          }
+        }
+        return false;
+      }};
+      for (const Symbol *dummyArg : details.dummyArgs()) {
+        needed = needed || hasInterface(dummyArg);
+      }
+      needed =
+          needed || (details.isFunction() && hasInterface(&details.result()));
+      if (needed && needSet_.insert(symbol).second) {
         need_.push_back(symbol);
       }
     }
