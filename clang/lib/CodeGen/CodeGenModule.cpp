@@ -599,7 +599,7 @@ void CodeGenModule::Release() {
 
     auto *GV = new llvm::GlobalVariable(
         getModule(), ATy, false, llvm::GlobalValue::AppendingLinkage,
-        llvm::ConstantArray::get(ATy, UsedArray), "gpu.used.external");
+        llvm::ConstantArray::get(ATy, UsedArray), "__clang_gpu_used_external");
     addCompilerUsedGlobal(GV);
   }
 
@@ -5502,12 +5502,11 @@ CodeGenModule::GetAddrOfConstantCFString(const StringLiteral *Literal) {
   switch (Triple.getObjectFormat()) {
   case llvm::Triple::UnknownObjectFormat:
     llvm_unreachable("unknown file format");
-  case llvm::Triple::GOFF:
-    llvm_unreachable("GOFF is not yet implemented");
-  case llvm::Triple::XCOFF:
-    llvm_unreachable("XCOFF is not yet implemented");
   case llvm::Triple::DXContainer:
-    llvm_unreachable("DXContainer is not yet implemented");
+  case llvm::Triple::GOFF:
+  case llvm::Triple::SPIRV:
+  case llvm::Triple::XCOFF:
+    llvm_unreachable("unimplemented");
   case llvm::Triple::COFF:
   case llvm::Triple::ELF:
   case llvm::Triple::Wasm:

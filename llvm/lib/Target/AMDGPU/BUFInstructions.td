@@ -1188,9 +1188,9 @@ let SubtargetPredicate = isGFX90APlus in {
     let SubtargetPredicate = isGFX90AOnly;
   }
 
-  defm BUFFER_ATOMIC_ADD_F64 : MUBUF_Pseudo_Atomics<"buffer_atomic_add_f64", VReg_64, f64, int_amdgcn_global_atomic_fadd>;
-  defm BUFFER_ATOMIC_MIN_F64 : MUBUF_Pseudo_Atomics<"buffer_atomic_min_f64", VReg_64, f64, int_amdgcn_global_atomic_fmin>;
-  defm BUFFER_ATOMIC_MAX_F64 : MUBUF_Pseudo_Atomics<"buffer_atomic_max_f64", VReg_64, f64, int_amdgcn_global_atomic_fmax>;
+  defm BUFFER_ATOMIC_ADD_F64 : MUBUF_Pseudo_Atomics<"buffer_atomic_add_f64", VReg_64, f64>;
+  defm BUFFER_ATOMIC_MIN_F64 : MUBUF_Pseudo_Atomics<"buffer_atomic_min_f64", VReg_64, f64>;
+  defm BUFFER_ATOMIC_MAX_F64 : MUBUF_Pseudo_Atomics<"buffer_atomic_max_f64", VReg_64, f64>;
 } // End SubtargetPredicate = isGFX90APlus
 
 def BUFFER_INV : MUBUF_Invalidate<"buffer_inv"> {
@@ -1381,10 +1381,11 @@ defm : MUBUF_StoreIntrinsicPat<SIbuffer_store_short, i32, "BUFFER_STORE_SHORT">;
 // buffer_atomic patterns
 //===----------------------------------------------------------------------===//
 
-multiclass BufferAtomicPat<string OpPrefix, ValueType vt, string Inst> {
+multiclass BufferAtomicPat<string OpPrefix, ValueType vt, string Inst, bit isIntr = 0> {
   foreach RtnMode = ["ret", "noret"] in {
 
-  defvar Op = !cast<SDPatternOperator>(OpPrefix # "_" # RtnMode # "_" # vt.Size);
+  defvar Op = !cast<SDPatternOperator>(OpPrefix # "_" # RtnMode
+                                       # !if(isIntr, "", "_" # vt.Size));
   defvar InstSuffix = !if(!eq(RtnMode, "ret"), "_RTN", "");
 
   def : GCNPat<
@@ -1401,6 +1402,10 @@ multiclass BufferAtomicPat<string OpPrefix, ValueType vt, string Inst> {
   >;
 
   } // end foreach RtnMode
+}
+
+multiclass BufferAtomicIntrPat<string OpPrefix, ValueType vt, string Inst> {
+  defm : BufferAtomicPat<OpPrefix, vt, Inst, /* isIntr */ 1>;
 }
 
 multiclass BufferAtomicCmpSwapPat<ValueType vt, ValueType data_vt, string Inst> {
@@ -1592,6 +1597,9 @@ defm : BufferAtomicPatterns_NO_RTN<SIbuffer_atomic_fadd, v2f16, "BUFFER_ATOMIC_P
 }
 
 let SubtargetPredicate = isGFX90APlus in {
+  defm : BufferAtomicIntrPat<"int_amdgcn_global_atomic_fadd", f64, "BUFFER_ATOMIC_ADD_F64">;
+  defm : BufferAtomicIntrPat<"int_amdgcn_global_atomic_fmin", f64, "BUFFER_ATOMIC_MIN_F64">;
+  defm : BufferAtomicIntrPat<"int_amdgcn_global_atomic_fmax", f64, "BUFFER_ATOMIC_MAX_F64">;
   defm : SIBufferAtomicPat<"SIbuffer_atomic_fadd", f32,   "BUFFER_ATOMIC_ADD_F32">;
   defm : SIBufferAtomicPat<"SIbuffer_atomic_fadd", v2f16, "BUFFER_ATOMIC_PK_ADD_F16">;
 
@@ -1851,7 +1859,7 @@ defm : MUBUFScratchStorePat <BUFFER_STORE_DWORDX3_OFFEN, BUFFER_STORE_DWORDX3_OF
 defm : MUBUFScratchStorePat <BUFFER_STORE_DWORDX4_OFFEN, BUFFER_STORE_DWORDX4_OFFSET, v4i32, store_private, VReg_128>;
 
 
-let OtherPredicates = [D16PreservesUnusedBits, DisableFlatScratch] in {
+let OtherPredicates = [HasD16LoadStore, DisableFlatScratch] in {
  // Hiding the extract high pattern in the PatFrag seems to not
  // automatically increase the complexity.
 let AddedComplexity = 1 in {

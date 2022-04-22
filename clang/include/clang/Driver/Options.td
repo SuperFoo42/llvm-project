@@ -812,9 +812,9 @@ def Xcuda_fatbinary : Separate<["-"], "Xcuda-fatbinary">,
   HelpText<"Pass <arg> to fatbinary invocation">, MetaVarName<"<arg>">;
 def Xcuda_ptxas : Separate<["-"], "Xcuda-ptxas">,
   HelpText<"Pass <arg> to the ptxas assembler">, MetaVarName<"<arg>">;
-def Xopenmp_target : Separate<["-"], "Xopenmp-target">,
+def Xopenmp_target : Separate<["-"], "Xopenmp-target">, Group<CompileOnly_Group>,
   HelpText<"Pass <arg> to the target offloading toolchain.">, MetaVarName<"<arg>">;
-def Xopenmp_target_EQ : JoinedAndSeparate<["-"], "Xopenmp-target=">,
+def Xopenmp_target_EQ : JoinedAndSeparate<["-"], "Xopenmp-target=">, Group<CompileOnly_Group>,
   HelpText<"Pass <arg> to the target offloading toolchain identified by <triple>.">,
   MetaVarName<"<triple> <arg>">;
 def z : Separate<["-"], "z">, Flags<[LinkerInput, RenderAsInput]>,
@@ -1430,6 +1430,9 @@ def fdiagnostics_hotness_threshold_EQ : Joined<["-"], "fdiagnostics-hotness-thre
     Group<f_Group>, Flags<[CC1Option]>, MetaVarName<"<value>">,
     HelpText<"Prevent optimization remarks from being output if they do not have at least this profile count. "
     "Use 'auto' to apply the threshold from profile summary">;
+def fdiagnostics_misexpect_tolerance_EQ : Joined<["-"], "fdiagnostics-misexpect-tolerance=">,
+    Group<f_Group>, Flags<[CC1Option]>, MetaVarName<"<value>">,
+    HelpText<"Prevent misexpect diagnostics from being output if the profile counts are within N% of the expected. ">;
 defm diagnostics_show_option : BoolFOption<"diagnostics-show-option",
     DiagnosticOpts<"ShowOptionNames">, DefaultTrue,
     NegFlag<SetFalse, [CC1Option]>, PosFlag<SetTrue, [], "Print option name with mappable diagnostics">>;
@@ -2294,6 +2297,11 @@ defm implicit_modules : BoolFOption<"implicit-modules",
 def fretain_comments_from_system_headers : Flag<["-"], "fretain-comments-from-system-headers">, Group<f_Group>, Flags<[CC1Option]>,
   MarshallingInfoFlag<LangOpts<"RetainCommentsFromSystemHeaders">>;
 
+def fno_knr_functions : Flag<["-"], "fno-knr-functions">, Group<f_Group>,
+  MarshallingInfoFlag<LangOpts<"DisableKNRFunctions">>,
+  HelpText<"Disable support for K&R C function declarations">,
+  Flags<[CC1Option, CoreOption]>;
+
 def fmudflapth : Flag<["-"], "fmudflapth">, Group<f_Group>;
 def fmudflap : Flag<["-"], "fmudflap">, Group<f_Group>;
 def fnested_functions : Flag<["-"], "fnested-functions">, Group<f_Group>;
@@ -2521,6 +2529,8 @@ def static_openmp: Flag<["-"], "static-openmp">,
   HelpText<"Use the static host OpenMP runtime while linking.">;
 def fopenmp_new_driver : Flag<["-"], "fopenmp-new-driver">, Flags<[CC1Option]>, Group<Action_Group>,
   HelpText<"Use the new driver for OpenMP offloading.">;
+def fno_openmp_new_driver : Flag<["-"], "fno-openmp-new-driver">, Flags<[CC1Option]>, Group<Action_Group>,
+  HelpText<"Don't use the new driver for OpenMP offloading.">;
 def fno_optimize_sibling_calls : Flag<["-"], "fno-optimize-sibling-calls">, Group<f_Group>, Flags<[CC1Option]>,
   HelpText<"Disable tail call optimization, keeping the call stack accurate">,
   MarshallingInfoFlag<CodeGenOpts<"DisableTailCalls">>;
@@ -4844,15 +4854,20 @@ def target_abi : Separate<["-"], "target-abi">,
   MarshallingInfoString<TargetOpts<"ABI">>;
 def target_sdk_version_EQ : Joined<["-"], "target-sdk-version=">,
   HelpText<"The version of target SDK used for compilation">;
-def darwin_target_variant_triple : Separate<["-"], "darwin-target-variant-triple">,
-  HelpText<"Specify the darwin target variant triple">,
-  MarshallingInfoString<TargetOpts<"DarwinTargetVariantTriple">>,
-  Normalizer<"normalizeTriple">;
 def darwin_target_variant_sdk_version_EQ : Joined<["-"],
   "darwin-target-variant-sdk-version=">,
   HelpText<"The version of darwin target variant SDK used for compilation">;
 
 } // let Flags = [CC1Option, CC1AsOption, NoDriverOption]
+
+let Flags = [CC1Option, CC1AsOption] in {
+
+def darwin_target_variant_triple : Separate<["-"], "darwin-target-variant-triple">,
+  HelpText<"Specify the darwin target variant triple">,
+  MarshallingInfoString<TargetOpts<"DarwinTargetVariantTriple">>,
+  Normalizer<"normalizeTriple">;
+
+} // let Flags = [CC1Option, CC1AsOption]
 
 //===----------------------------------------------------------------------===//
 // Target Options (cc1 + cc1as + fc1)

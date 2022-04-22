@@ -33,11 +33,6 @@ namespace bufferization {
 using namespace mlir;
 using namespace bufferization;
 
-/// Attribute name used to mark the bufferization layout for region
-/// arguments during linalg comprehensive bufferization.
-constexpr const ::llvm::StringLiteral
-    bufferization::BufferizableOpInterface::kBufferLayoutAttrName;
-
 /// Attribute name used to mark region arguments that can be bufferized
 /// in-place during linalg comprehensive bufferization.
 constexpr const ::llvm::StringLiteral
@@ -626,7 +621,7 @@ bool bufferization::isFunctionArgument(Value value) {
   auto bbArg = value.dyn_cast<BlockArgument>();
   if (!bbArg)
     return false;
-  return isa<FuncOp>(bbArg.getOwner()->getParentOp());
+  return isa<func::FuncOp>(bbArg.getOwner()->getParentOp());
 }
 
 MemRefType bufferization::getContiguousMemRefType(ShapedType shapedType,

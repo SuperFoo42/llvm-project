@@ -2239,7 +2239,7 @@ private:
   /// Namespace definitions that we will export when they finish.
   llvm::SmallPtrSet<const NamespaceDecl*, 8> DeferredExportedNamespaces;
 
-  /// Get the module whose scope we are currently within.
+  /// Get the module unit whose scope we are currently within.
   Module *getCurrentModule() const {
     return ModuleScopes.empty() ? nullptr : ModuleScopes.back().Module;
   }
@@ -2256,6 +2256,11 @@ private:
   void PopGlobalModuleFragment();
 
   VisibleModuleSet VisibleModules;
+
+  /// Cache for module units which is usable for current module.
+  llvm::DenseSet<const Module *> UsableModuleUnitsCache;
+
+  bool isUsableModule(const Module *M);
 
 public:
   /// Get the module owning an entity.
@@ -3489,6 +3494,8 @@ public:
   HLSLNumThreadsAttr *mergeHLSLNumThreadsAttr(Decl *D,
                                               const AttributeCommonInfo &AL,
                                               int X, int Y, int Z);
+  HLSLShaderAttr *mergeHLSLShaderAttr(Decl *D, const AttributeCommonInfo &AL,
+                                      HLSLShaderAttr::ShaderType ShaderType);
 
   void mergeDeclAttributes(NamedDecl *New, Decl *Old,
                            AvailabilityMergeKind AMK = AMK_Redeclaration);
@@ -4235,8 +4242,8 @@ public:
                                 = NotForRedeclaration);
   bool LookupBuiltin(LookupResult &R);
   void LookupNecessaryTypesForBuiltin(Scope *S, unsigned ID);
-  bool LookupName(LookupResult &R, Scope *S,
-                  bool AllowBuiltinCreation = false);
+  bool LookupName(LookupResult &R, Scope *S, bool AllowBuiltinCreation = false,
+                  bool ForceNoCPlusPlus = false);
   bool LookupQualifiedName(LookupResult &R, DeclContext *LookupCtx,
                            bool InUnqualifiedLookup = false);
   bool LookupQualifiedName(LookupResult &R, DeclContext *LookupCtx,
@@ -6852,9 +6859,11 @@ public:
   ///
   ///  CodeGen handles emission of lambda captures, ignoring these dummy
   ///  variables appropriately.
-  VarDecl *createLambdaInitCaptureVarDecl(
-      SourceLocation Loc, QualType InitCaptureType, SourceLocation EllipsisLoc,
-      IdentifierInfo *Id, unsigned InitStyle, Expr *Init, DeclContext *DeclCtx);
+  VarDecl *createLambdaInitCaptureVarDecl(SourceLocation Loc,
+                                          QualType InitCaptureType,
+                                          SourceLocation EllipsisLoc,
+                                          IdentifierInfo *Id,
+                                          unsigned InitStyle, Expr *Init);
 
   /// Add an init-capture to a lambda scope.
   void addInitCapture(sema::LambdaScopeInfo *LSI, VarDecl *Var);
@@ -6863,29 +6872,21 @@ public:
   /// given lambda.
   void finishLambdaExplicitCaptures(sema::LambdaScopeInfo *LSI);
 
-  /// Deduce a block or lambda's return type based on the return
-  /// statements present in the body.
-  void deduceClosureReturnType(sema::CapturingScopeInfo &CSI);
-
-  /// Once the Lambdas capture are known, we can
-  /// start to create the closure, call operator method,
-  /// and keep track of the captures.
-  /// We do the capture lookup here, but they are not actually captured
-  /// until after we know what the qualifiers of the call operator are.
-  void ActOnLambdaIntroducer(LambdaIntroducer &Intro, Scope *CurContext);
-
-  /// This is called after parsing the explicit template parameter list
+  /// \brief This is called after parsing the explicit template parameter list
   /// on a lambda (if it exists) in C++2a.
-  void ActOnLambdaExplicitTemplateParameterList(LambdaIntroducer &Intro,
-                                                SourceLocation LAngleLoc,
+  void ActOnLambdaExplicitTemplateParameterList(SourceLocation LAngleLoc,
                                                 ArrayRef<NamedDecl *> TParams,
                                                 SourceLocation RAngleLoc,
                                                 ExprResult RequiresClause);
 
-  void ActOnLambdaClosureQualifiers(
-      LambdaIntroducer &Intro, SourceLocation MutableLoc, SourceLocation EndLoc,
-      MutableArrayRef<DeclaratorChunk::ParamInfo> ParamInfo,
-      const DeclSpec &DS);
+  /// Introduce the lambda parameters into scope.
+  void addLambdaParameters(
+      ArrayRef<LambdaIntroducer::LambdaCapture> Captures,
+      CXXMethodDecl *CallOperator, Scope *CurScope);
+
+  /// Deduce a block or lambda's return type based on the return
+  /// statements present in the body.
+  void deduceClosureReturnType(sema::CapturingScopeInfo &CSI);
 
   /// ActOnStartOfLambdaDefinition - This is called just before we start
   /// parsing the body of a lambda; it analyzes the explicit captures and

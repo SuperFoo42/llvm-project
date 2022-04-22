@@ -12773,6 +12773,14 @@ TEST_F(FormatTest, PullInlineFunctionDefinitionsIntoSingleLine) {
                "};",
                MergeInlineOnly);
 
+  verifyFormat("struct S {\n"
+               "// comment\n"
+               "#ifdef FOO\n"
+               "  int foo() { bar(); }\n"
+               "#endif\n"
+               "};",
+               MergeInlineOnly);
+
   // Also verify behavior when BraceWrapping.AfterFunction = true
   MergeInlineOnly.BreakBeforeBraces = FormatStyle::BS_Custom;
   MergeInlineOnly.BraceWrapping.AfterFunction = true;
@@ -13393,6 +13401,12 @@ TEST_F(FormatTest, MergeHandlingInTheFaceOfPreprocessorDirectives) {
                "    return 1;            \\\n"
                "  return 2;",
                ShortMergedIf);
+
+  verifyFormat("//\n"
+               "#define a \\\n"
+               "  if      \\\n"
+               "  0",
+               getChromiumStyle(FormatStyle::LK_Cpp));
 }
 
 TEST_F(FormatTest, FormatStarDependingOnContext) {

@@ -2554,8 +2554,9 @@ Sema::ActOnIdExpression(Scope *S, CXXScopeSpec &SS,
     return ExprError();
 
   // This could be an implicitly declared function reference (legal in C90,
-  // extension in C99, forbidden in C++).
-  if (R.empty() && HasTrailingLParen && II && !getLangOpts().CPlusPlus) {
+  // extension in C99, forbidden in C++ and C2x).
+  if (R.empty() && HasTrailingLParen && II && !getLangOpts().CPlusPlus &&
+      !getLangOpts().C2x) {
     NamedDecl *D = ImplicitlyDefineFunction(NameLoc, *II, S);
     if (D) R.addDecl(D);
   }
@@ -3385,7 +3386,7 @@ ExprResult Sema::BuildDeclarationNameExpr(
     // FIXME: Support lambda-capture of BindingDecls, once CWG actually
     // decides how that's supposed to work.
     auto *BD = cast<BindingDecl>(VD);
-    if (BD->getDeclContext() != CurContext && !isUnevaluatedContext()) {
+    if (BD->getDeclContext() != CurContext) {
       auto *DD = dyn_cast_or_null<VarDecl>(BD->getDecomposedDecl());
       if (DD && DD->hasLocalStorage())
         diagnoseUncapturableValueReference(*this, Loc, BD);
@@ -3395,7 +3396,7 @@ ExprResult Sema::BuildDeclarationNameExpr(
 
   case Decl::Function: {
     if (unsigned BID = cast<FunctionDecl>(VD)->getBuiltinID()) {
-      if (!Context.BuiltinInfo.isPredefinedLibFunction(BID)) {
+      if (!Context.BuiltinInfo.isDirectlyAddressable(BID)) {
         type = Context.BuiltinFnTy;
         valueKind = VK_PRValue;
         break;
@@ -3597,6 +3598,8 @@ ExprResult Sema::ActOnCharacterConstant(const Token &Tok, Scope *UDLScope) {
   QualType Ty;
   if (Literal.isWide())
     Ty = Context.WideCharTy; // L'x' -> wchar_t in C and C++.
+  else if (Literal.isUTF8() && getLangOpts().C2x)
+    Ty = Context.UnsignedCharTy; // u8'x' -> unsigned char in C2x
   else if (Literal.isUTF8() && getLangOpts().Char8)
     Ty = Context.Char8Ty; // u8'x' -> char8_t when it exists.
   else if (Literal.isUTF16())
@@ -3606,7 +3609,8 @@ ExprResult Sema::ActOnCharacterConstant(const Token &Tok, Scope *UDLScope) {
   else if (!getLangOpts().CPlusPlus || Literal.isMultiChar())
     Ty = Context.IntTy;   // 'x' -> int in C, 'wxyz' -> int in C++.
   else
-    Ty = Context.CharTy;  // 'x' -> char in C++
+    Ty = Context.CharTy; // 'x' -> char in C++;
+                         // u8'x' -> char in C11-C17 and in C++ without char8_t.
 
   CharacterLiteral::CharacterKind Kind = CharacterLiteral::Ascii;
   if (Literal.isWide())
@@ -6551,18 +6555,17 @@ static void DiagnosedUnqualifiedCallsToStdFunctions(Sema &S, CallExpr *Call) {
   if (DRE->getQualifier())
     return;
 
-  NamedDecl *D = dyn_cast_or_null<NamedDecl>(Call->getCalleeDecl());
-  if (!D || !D->isInStdNamespace())
+  const FunctionDecl *FD = Call->getDirectCallee();
+  if (!FD)
     return;
 
   // Only warn for some functions deemed more frequent or problematic.
-  static constexpr llvm::StringRef SpecialFunctions[] = {"move", "forward"};
-  auto it = llvm::find(SpecialFunctions, D->getName());
-  if (it == std::end(SpecialFunctions))
+  unsigned BuiltinID = FD->getBuiltinID();
+  if (BuiltinID != Builtin::BImove && BuiltinID != Builtin::BIforward)
     return;
 
   S.Diag(DRE->getLocation(), diag::warn_unqualified_call_to_std_cast_function)
-      << D->getQualifiedNameAsString()
+      << FD->getQualifiedNameAsString()
       << FixItHint::CreateInsertion(DRE->getLocation(), "std::");
 }
 
@@ -16928,10 +16931,12 @@ bool Sema::DiagnoseAssignmentResult(AssignConvertType ConvTy,
   }
 
   PartialDiagnostic FDiag = PDiag(DiagKind);
+  AssignmentAction ActionForDiag = Action;
   if (Action == AA_Passing_CFAudited)
-    FDiag << FirstType << SecondType << AA_Passing << SrcExpr->getSourceRange();
-  else
-    FDiag << FirstType << SecondType << Action << SrcExpr->getSourceRange();
+    ActionForDiag = AA_Passing;
+
+  FDiag << FirstType << SecondType << ActionForDiag
+        << SrcExpr->getSourceRange();
 
   if (DiagKind == diag::ext_typecheck_convert_incompatible_pointer_sign ||
       DiagKind == diag::err_typecheck_convert_incompatible_pointer_sign) {
@@ -18542,37 +18547,6 @@ static void buildLambdaCaptureFixit(Sema &Sema, LambdaScopeInfo *LSI,
   }
 }
 
-static bool CheckCaptureUseBeforeLambdaQualifiers(Sema &S, VarDecl *Var,
-                                                  SourceLocation ExprLoc,
-                                                  LambdaScopeInfo *LSI) {
-  if (Var->isInvalidDecl())
-    return false;
-
-  bool ByCopy = LSI->ImpCaptureStyle == LambdaScopeInfo::ImpCap_LambdaByval;
-  SourceLocation Loc = LSI->IntroducerRange.getBegin();
-  bool Explicitly = false;
-  for (auto &&C : LSI->DelayedCaptures) {
-    VarDecl *CV = C.second.Var;
-    if (Var != CV)
-      continue;
-    ByCopy = C.second.Kind == LambdaCaptureKind::LCK_ByCopy;
-    Loc = C.second.Loc;
-    Explicitly = true;
-    break;
-  }
-  if (ByCopy && LSI->BeforeLambdaQualifiersScope) {
-    // This can only occur in a non-ODR context, so we need to diagnose eagerly,
-    // even when BuildAndDiagnose is false
-    S.Diag(ExprLoc, diag::err_lambda_used_before_capture) << Var;
-    S.Diag(Loc, diag::note_var_explicitly_captured_here) << Var << Explicitly;
-    if (!Var->isInitCapture())
-      S.Diag(Var->getBeginLoc(), diag::note_entity_declared_at) << Var;
-    Var->setInvalidDecl();
-    return false;
-  }
-  return true;
-}
-
 bool Sema::tryCaptureVariable(
     VarDecl *Var, SourceLocation ExprLoc, TryCaptureKind Kind,
     SourceLocation EllipsisLoc, bool BuildAndDiagnose, QualType &CaptureType,
@@ -18596,6 +18570,11 @@ bool Sema::tryCaptureVariable(
     }
   }
 
+
+  // If the variable is declared in the current context, there is no need to
+  // capture it.
+  if (VarDC == DC) return true;
+
   // Capture global variables if it is required to use private copy of this
   // variable.
   bool IsGlobal = !Var->hasLocalStorage();
@@ -18618,36 +18597,13 @@ bool Sema::tryCaptureVariable(
   bool Nested = false;
   bool Explicit = (Kind != TryCapture_Implicit);
   unsigned FunctionScopesIndex = MaxFunctionScopesIndex;
-  bool IsInLambdaBeforeQualifiers;
   do {
-    IsInLambdaBeforeQualifiers = false;
-
-    LambdaScopeInfo *LSI = nullptr;
-    if (!FunctionScopes.empty())
-      LSI = dyn_cast_or_null<LambdaScopeInfo>(
-          FunctionScopes[FunctionScopesIndex]);
-    if (LSI && LSI->BeforeLambdaQualifiersScope) {
-      if (isa<ParmVarDecl>(Var))
-        return true;
-      IsInLambdaBeforeQualifiers = true;
-      if (!CheckCaptureUseBeforeLambdaQualifiers(*this, Var, ExprLoc, LSI)) {
-        break;
-      }
-    }
-
-    // If the variable is declared in the current context, there is no need to
-    // capture it.
-    if (!IsInLambdaBeforeQualifiers &&
-        FunctionScopesIndex == MaxFunctionScopesIndex && VarDC == DC)
-      return true;
-
     // Only block literals, captured statements, and lambda expressions can
     // capture; other scopes don't work.
-    DeclContext *ParentDC =
-        IsInLambdaBeforeQualifiers
-            ? DC->getParent()
-            : getParentOfCapturingContextOrNull(DC, Var, ExprLoc,
-                                                BuildAndDiagnose, *this);
+    DeclContext *ParentDC = getParentOfCapturingContextOrNull(DC, Var,
+                                                              ExprLoc,
+                                                              BuildAndDiagnose,
+                                                              *this);
     // We need to check for the parent *first* because, if we *have*
     // private-captured a global variable, we need to recursively capture it in
     // intermediate blocks, lambdas, etc.
@@ -18662,9 +18618,9 @@ bool Sema::tryCaptureVariable(
     FunctionScopeInfo  *FSI = FunctionScopes[FunctionScopesIndex];
     CapturingScopeInfo *CSI = cast<CapturingScopeInfo>(FSI);
 
+
     // Check whether we've already captured it.
-    if (!IsInLambdaBeforeQualifiers &&
-        isVariableAlreadyCapturedInScopeInfo(CSI, Var, Nested, CaptureType,
+    if (isVariableAlreadyCapturedInScopeInfo(CSI, Var, Nested, CaptureType,
                                              DeclRefType)) {
       CSI->getCapture(Var).markUsed(BuildAndDiagnose);
       break;
@@ -18673,8 +18629,7 @@ bool Sema::tryCaptureVariable(
     // we do not want to capture new variables.  What was captured
     // during either a lambdas transformation or initial parsing
     // should be used.
-    if (!IsInLambdaBeforeQualifiers &&
-        isGenericLambdaCallOperatorSpecialization(DC)) {
+    if (isGenericLambdaCallOperatorSpecialization(DC)) {
       if (BuildAndDiagnose) {
         LambdaScopeInfo *LSI = cast<LambdaScopeInfo>(CSI);
         if (LSI->ImpCaptureStyle == CapturingScopeInfo::ImpCap_None) {
@@ -18689,8 +18644,7 @@ bool Sema::tryCaptureVariable(
     }
 
     // Try to capture variable-length arrays types.
-    if (!IsInLambdaBeforeQualifiers &&
-        Var->getType()->isVariablyModifiedType()) {
+    if (Var->getType()->isVariablyModifiedType()) {
       // We're going to walk down into the type and look for VLA
       // expressions.
       QualType QTy = Var->getType();
@@ -18699,7 +18653,7 @@ bool Sema::tryCaptureVariable(
       captureVariablyModifiedType(Context, QTy, CSI);
     }
 
-    if (!IsInLambdaBeforeQualifiers && getLangOpts().OpenMP) {
+    if (getLangOpts().OpenMP) {
       if (auto *RSI = dyn_cast<CapturedRegionScopeInfo>(CSI)) {
         // OpenMP private variables should not be captured in outer scope, so
         // just break here. Similarly, global variables that are captured in a
@@ -18780,11 +18734,11 @@ bool Sema::tryCaptureVariable(
       }
       return true;
     }
-    Explicit = false;
+
     FunctionScopesIndex--;
-    if (!IsInLambdaBeforeQualifiers)
-      DC = ParentDC;
-  } while (IsInLambdaBeforeQualifiers || !VarDC->Equals(DC));
+    DC = ParentDC;
+    Explicit = false;
+  } while (!VarDC->Equals(DC));
 
   // Walk back down the scope stack, (e.g. from outer lambda to inner lambda)
   // computing the type of the capture at each step, checking type-specific
@@ -18819,9 +18773,6 @@ bool Sema::tryCaptureVariable(
       Nested = true;
     } else {
       LambdaScopeInfo *LSI = cast<LambdaScopeInfo>(CSI);
-      if (!CheckCaptureUseBeforeLambdaQualifiers(*this, Var, ExprLoc, LSI)) {
-        return true;
-      }
       Invalid =
           !captureInLambda(LSI, Var, ExprLoc, BuildAndDiagnose, CaptureType,
                            DeclRefType, Nested, Kind, EllipsisLoc,
@@ -20528,13 +20479,44 @@ ExprResult Sema::CheckPlaceholderExpr(Expr *E) {
     auto *DRE = dyn_cast<DeclRefExpr>(E->IgnoreParenImpCasts());
     if (DRE) {
       auto *FD = cast<FunctionDecl>(DRE->getDecl());
-      if (FD->getBuiltinID() == Builtin::BI__noop) {
+      unsigned BuiltinID = FD->getBuiltinID();
+      if (BuiltinID == Builtin::BI__noop) {
         E = ImpCastExprToType(E, Context.getPointerType(FD->getType()),
                               CK_BuiltinFnToFnPtr)
                 .get();
         return CallExpr::Create(Context, E, /*Args=*/{}, Context.IntTy,
                                 VK_PRValue, SourceLocation(),
                                 FPOptionsOverride());
+      }
+
+      if (Context.BuiltinInfo.isInStdNamespace(BuiltinID)) {
+        // Any use of these other than a direct call is ill-formed as of C++20,
+        // because they are not addressable functions. In earlier language
+        // modes, warn and force an instantiation of the real body.
+        Diag(E->getBeginLoc(),
+             getLangOpts().CPlusPlus20
+                 ? diag::err_use_of_unaddressable_function
+                 : diag::warn_cxx20_compat_use_of_unaddressable_function);
+        if (FD->isImplicitlyInstantiable()) {
+          // Require a definition here because a normal attempt at
+          // instantiation for a builtin will be ignored, and we won't try
+          // again later. We assume that the definition of the template
+          // precedes this use.
+          InstantiateFunctionDefinition(E->getBeginLoc(), FD,
+                                        /*Recursive=*/false,
+                                        /*DefinitionRequired=*/true,
+                                        /*AtEndOfTU=*/false);
+        }
+        // Produce a properly-typed reference to the function.
+        CXXScopeSpec SS;
+        SS.Adopt(DRE->getQualifierLoc());
+        TemplateArgumentListInfo TemplateArgs;
+        DRE->copyTemplateArgumentsInto(TemplateArgs);
+        return BuildDeclRefExpr(
+            FD, FD->getType(), VK_LValue, DRE->getNameInfo(),
+            DRE->hasQualifier() ? &SS : nullptr, DRE->getFoundDecl(),
+            DRE->getTemplateKeywordLoc(),
+            DRE->hasExplicitTemplateArgs() ? &TemplateArgs : nullptr);
       }
     }
 

@@ -22,7 +22,8 @@ using namespace mlir;
 
 namespace {
 /// Simple transform op defined outside of the dialect. Just emits a remark when
-/// applied.
+/// applied. This op is defined in C++ to test that C++ definitions also work
+/// for op injection into the Transform dialect.
 class TestTransformOp
     : public Op<TestTransformOp, transform::TransformOpInterface::Trait> {
 public:
@@ -38,31 +39,74 @@ public:
 
   LogicalResult apply(transform::TransformResults &results,
                       transform::TransformState &state) {
-    emitRemark() << "applying transformation";
+    InFlightDiagnostic remark = emitRemark() << "applying transformation";
+    if (Attribute message = getMessage())
+      remark << " " << message;
+
     return success();
   }
+
+  Attribute getMessage() { return getOperation()->getAttr("message"); }
 
   static ParseResult parse(OpAsmParser &parser, OperationState &state) {
-    return success();
+    StringAttr message;
+    OptionalParseResult result = parser.parseOptionalAttribute(message);
+    if (!result.hasValue())
+      return success();
+
+    if (result.getValue().succeeded())
+      state.addAttribute("message", message);
+    return result.getValue();
   }
 
-  void print(OpAsmPrinter &printer) {}
+  void print(OpAsmPrinter &printer) {
+    if (getMessage())
+      printer << " " << getMessage();
+  }
+};
+
+/// A test op to exercise the verifier of the PossibleTopLevelTransformOpTrait
+/// in cases where it is attached to ops that do not comply with the trait
+/// requirements. This op cannot be defined in ODS because ODS generates strict
+/// verifiers that overalp with those in the trait and run earlier.
+class TestTransformUnrestrictedOpNoInterface
+    : public Op<TestTransformUnrestrictedOpNoInterface,
+                transform::PossibleTopLevelTransformOpTrait,
+                transform::TransformOpInterface::Trait> {
+public:
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(
+      TestTransformUnrestrictedOpNoInterface)
+
+  using Op::Op;
+
+  static ArrayRef<StringRef> getAttributeNames() { return {}; }
+
+  static constexpr llvm::StringLiteral getOperationName() {
+    return llvm::StringLiteral(
+        "transform.test_transform_unrestricted_op_no_interface");
+  }
+
+  LogicalResult apply(transform::TransformResults &results,
+                      transform::TransformState &state) {
+    return success();
+  }
 };
 } // namespace
 
 LogicalResult mlir::test::TestProduceParamOrForwardOperandOp::apply(
     transform::TransformResults &results, transform::TransformState &state) {
   if (getOperation()->getNumOperands() != 0) {
-    results.set(getResult().cast<OpResult>(), getOperand(0).getDefiningOp());
+    results.set(getResult().cast<OpResult>(),
+                getOperation()->getOperand(0).getDefiningOp());
   } else {
     results.set(getResult().cast<OpResult>(),
-                reinterpret_cast<Operation *>(*parameter()));
+                reinterpret_cast<Operation *>(*getParameter()));
   }
   return success();
 }
 
 LogicalResult mlir::test::TestProduceParamOrForwardOperandOp::verify() {
-  if (parameter().hasValue() ^ (getNumOperands() != 1))
+  if (getParameter().hasValue() ^ (getNumOperands() != 1))
     return emitOpError() << "expects either a parameter or an operand";
   return success();
 }
@@ -72,12 +116,21 @@ LogicalResult mlir::test::TestConsumeOperandIfMatchesParamOrFail::apply(
   ArrayRef<Operation *> payload = state.getPayloadOps(getOperand());
   assert(payload.size() == 1 && "expected a single target op");
   auto value = reinterpret_cast<intptr_t>(payload[0]);
-  if (static_cast<uint64_t>(value) != parameter()) {
+  if (static_cast<uint64_t>(value) != getParameter()) {
     return emitOpError() << "expected the operand to be associated with "
-                         << parameter() << " got " << value;
+                         << getParameter() << " got " << value;
   }
 
   emitRemark() << "succeeded";
+  return success();
+}
+
+LogicalResult mlir::test::TestPrintRemarkAtOperandOp::apply(
+    transform::TransformResults &results, transform::TransformState &state) {
+  ArrayRef<Operation *> payload = state.getPayloadOps(getOperand());
+  for (Operation *op : payload)
+    op->emitRemark() << getMessage();
+
   return success();
 }
 
@@ -92,6 +145,7 @@ public:
   TestTransformDialectExtension() {
     declareDependentDialect<pdl::PDLDialect>();
     registerTransformOps<TestTransformOp,
+                         TestTransformUnrestrictedOpNoInterface,
 #define GET_OP_LIST
 #include "TestTransformDialectExtension.cpp.inc"
                          >();
