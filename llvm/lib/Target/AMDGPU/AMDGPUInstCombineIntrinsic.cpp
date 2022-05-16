@@ -139,8 +139,10 @@ static Optional<Instruction *> modifyIntrinsicCall(
   if (!InstToReplace.getType()->isVoidTy())
     IC.replaceInstUsesWith(InstToReplace, NewCall);
 
+  bool RemoveOldIntr = &OldIntr != &InstToReplace;
+
   auto RetValue = IC.eraseInstFromFunction(InstToReplace);
-  if (!OldIntr.isIdenticalTo(&InstToReplace))
+  if (RemoveOldIntr)
     IC.eraseInstFromFunction(OldIntr);
 
   return RetValue;

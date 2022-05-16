@@ -2864,7 +2864,8 @@ ParseResult TransferReadOp::parse(OpAsmParser &parser, OperationState &result) {
     return failure();
   ParseResult hasMask = parser.parseOptionalComma();
   if (hasMask.succeeded()) {
-    parser.parseOperand(maskInfo);
+    if (parser.parseOperand(maskInfo))
+      return failure();
   }
   if (parser.parseOptionalAttrDict(result.attributes) ||
       parser.getCurrentLocation(&typesLoc) || parser.parseColonTypeList(types))
@@ -4698,7 +4699,8 @@ ParseResult WarpExecuteOnLane0Op::parse(OpAsmParser &parser,
   OpAsmParser::UnresolvedOperand laneId;
 
   // Parse predicate operand.
-  if (parser.parseLParen() || parser.parseRegionArgument(laneId) ||
+  if (parser.parseLParen() ||
+      parser.parseOperand(laneId, /*allowResultNumber=*/false) ||
       parser.parseRParen())
     return failure();
 

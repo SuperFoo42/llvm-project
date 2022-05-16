@@ -729,6 +729,14 @@ let IntrProperties = [IntrInaccessibleMemOnly, IntrWillReturn] in {
   def int_set_rounding  : DefaultAttrsIntrinsic<[], [llvm_i32_ty]>;
 }
 
+//===--------------- Floating Point Properties ----------------------------===//
+//
+
+def int_is_fpclass
+    : DefaultAttrsIntrinsic<[LLVMScalarOrSameVectorWidth<0, llvm_i1_ty>],
+                            [llvm_anyfloat_ty, llvm_i32_ty],
+                            [IntrNoMem, IntrWillReturn, ImmArg<ArgIndex<1>>]>;
+
 //===--------------- Constrained Floating Point Intrinsics ----------------===//
 //
 
@@ -2038,4 +2046,5 @@ include "llvm/IR/IntrinsicsBPF.td"
 include "llvm/IR/IntrinsicsSystemZ.td"
 include "llvm/IR/IntrinsicsWebAssembly.td"
 include "llvm/IR/IntrinsicsRISCV.td"
+include "llvm/IR/IntrinsicsSPIRV.td"
 include "llvm/IR/IntrinsicsVE.td"

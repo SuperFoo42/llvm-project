@@ -200,9 +200,9 @@ enum class SecProfSummaryFlags : uint32_t {
   /// SecFlagFSDiscriminator means this profile uses flow-sensitive
   /// discriminators.
   SecFlagFSDiscriminator = (1 << 2),
-  /// SecFlagIsCSNested means this is context-sensitive nested profile for
-  /// CSSPGO
-  SecFlagIsCSNested = (1 << 4),
+  /// SecFlagIsPreInlined means this profile contains ShouldBeInlined
+  /// contexts thus this is CS preinliner computed.
+  SecFlagIsPreInlined = (1 << 4),
 };
 
 enum class SecFuncMetadataFlags : uint32_t {
@@ -342,6 +342,15 @@ public:
                       : sampleprof_error::success;
   }
 
+  /// Decrease the number of samples for this record by \p S. Return the amout
+  /// of samples actually decreased.
+  uint64_t removeSamples(uint64_t S) {
+    if (S > NumSamples)
+      S = NumSamples;
+    NumSamples -= S;
+    return S;
+  }
+
   /// Add called function \p F with samples \p S.
   /// Optionally scale sample count \p S by \p Weight.
   ///
@@ -355,6 +364,18 @@ public:
         SaturatingMultiplyAdd(S, Weight, TargetSamples, &Overflowed);
     return Overflowed ? sampleprof_error::counter_overflow
                       : sampleprof_error::success;
+  }
+
+  /// Remove called function from the call target map. Return the target sample
+  /// count of the called function.
+  uint64_t removeCalledTarget(StringRef F) {
+    uint64_t Count = 0;
+    auto I = CallTargets.find(F);
+    if (I != CallTargets.end()) {
+      Count = I->second;
+      CallTargets.erase(I);
+    }
+    return Count;
   }
 
   /// Return true if this sample record contains function calls.
@@ -704,6 +725,13 @@ public:
                       : sampleprof_error::success;
   }
 
+  void removeTotalSamples(uint64_t Num) {
+    if (TotalSamples < Num)
+      TotalSamples = 0;
+    else
+      TotalSamples -= Num;
+  }
+
   void setTotalSamples(uint64_t Num) { TotalSamples = Num; }
 
   sampleprof_error addHeadSamples(uint64_t Num, uint64_t Weight = 1) {
@@ -726,6 +754,22 @@ public:
                                           uint64_t Weight = 1) {
     return BodySamples[LineLocation(LineOffset, Discriminator)].addCalledTarget(
         FName, Num, Weight);
+  }
+
+  // Remove a call target and decrease the body sample correspondingly. Return
+  // the number of body samples actually decreased.
+  uint64_t removeCalledTargetAndBodySample(uint32_t LineOffset,
+                                           uint32_t Discriminator,
+                                           StringRef FName) {
+    uint64_t Count = 0;
+    auto I = BodySamples.find(LineLocation(LineOffset, Discriminator));
+    if (I != BodySamples.end()) {
+      Count = I->second.removeCalledTarget(FName);
+      Count = I->second.removeSamples(Count);
+      if (!I->second.getSamples())
+        BodySamples.erase(I);
+    }
+    return Count;
   }
 
   sampleprof_error addBodySamplesForProbe(uint32_t Index, uint64_t Num,
@@ -830,7 +874,7 @@ public:
   /// Return the sample count of the first instruction of the function.
   /// The function can be either a standalone symbol or an inlined function.
   uint64_t getEntrySamples() const {
-    if (FunctionSamples::ProfileIsCSFlat && getHeadSamples()) {
+    if (FunctionSamples::ProfileIsCS && getHeadSamples()) {
       // For CS profile, if we already have more accurate head samples
       // counted by branch sample from caller, use them as entry samples.
       return getHeadSamples();
@@ -1047,9 +1091,9 @@ public:
 
   static bool ProfileIsProbeBased;
 
-  static bool ProfileIsCSFlat;
+  static bool ProfileIsCS;
 
-  static bool ProfileIsCSNested;
+  static bool ProfileIsPreInlined;
 
   SampleContext &getContext() const { return Context; }
 

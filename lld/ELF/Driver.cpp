@@ -1127,7 +1127,7 @@ static void readConfigs(opt::InputArgList &args) {
   config->oFormatBinary = isOutputFormatBinary(args);
   config->omagic = args.hasFlag(OPT_omagic, OPT_no_omagic, false);
   config->optRemarksFilename = args.getLastArgValue(OPT_opt_remarks_filename);
-  config->optStatsFilename = args.getLastArgValue(OPT_opt_stats_filename);
+  config->optStatsFilename = args.getLastArgValue(OPT_plugin_opt_stats_file);
 
   // Parse remarks hotness threshold. Valid value is either integer or 'auto'.
   if (auto *arg = args.getLastArg(OPT_opt_remarks_hotness_threshold)) {
@@ -2463,8 +2463,11 @@ void LinkerDriver::link(opt::InputArgList &args) {
 
   // Some symbols (such as __ehdr_start) are defined lazily only when there
   // are undefined symbols for them, so we add these to trigger that logic.
-  for (StringRef name : script->referencedSymbols)
-    addUnusedUndefined(name)->isUsedInRegularObj = true;
+  for (StringRef name : script->referencedSymbols) {
+    Symbol *sym = addUnusedUndefined(name);
+    sym->isUsedInRegularObj = true;
+    sym->referenced = true;
+  }
 
   // Prevent LTO from removing any definition referenced by -u.
   for (StringRef name : config->undefined)

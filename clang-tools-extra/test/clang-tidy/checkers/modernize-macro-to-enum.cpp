@@ -11,6 +11,47 @@
 
 #endif
 
+// Macros expanding to expressions involving only literals are converted.
+#define EXPR1 1 - 1
+#define EXPR2 1 + 1
+#define EXPR3 1 * 1
+#define EXPR4 1 / 1
+#define EXPR5 1 | 1
+#define EXPR6 1 & 1
+#define EXPR7 1 << 1
+#define EXPR8 1 >> 1
+#define EXPR9 1 % 2
+#define EXPR10 1 ^ 1
+#define EXPR11 (1 + (2))
+#define EXPR12 ((1) + (2 + 0) + (1 * 1) + (1 / 1) + (1 | 1 ) + (1 & 1) + (1 << 1) + (1 >> 1) + (1 % 2) + (1 ^ 1))
+// CHECK-MESSAGES: :[[@LINE-12]]:1: warning: replace macro with enum [modernize-macro-to-enum]
+// CHECK-MESSAGES: :[[@LINE-13]]:9: warning: macro 'EXPR1' defines an integral constant; prefer an enum instead
+// CHECK-MESSAGES: :[[@LINE-13]]:9: warning: macro 'EXPR2' defines an integral constant; prefer an enum instead
+// CHECK-MESSAGES: :[[@LINE-13]]:9: warning: macro 'EXPR3' defines an integral constant; prefer an enum instead
+// CHECK-MESSAGES: :[[@LINE-13]]:9: warning: macro 'EXPR4' defines an integral constant; prefer an enum instead
+// CHECK-MESSAGES: :[[@LINE-13]]:9: warning: macro 'EXPR5' defines an integral constant; prefer an enum instead
+// CHECK-MESSAGES: :[[@LINE-13]]:9: warning: macro 'EXPR6' defines an integral constant; prefer an enum instead
+// CHECK-MESSAGES: :[[@LINE-13]]:9: warning: macro 'EXPR7' defines an integral constant; prefer an enum instead
+// CHECK-MESSAGES: :[[@LINE-13]]:9: warning: macro 'EXPR8' defines an integral constant; prefer an enum instead
+// CHECK-MESSAGES: :[[@LINE-13]]:9: warning: macro 'EXPR9' defines an integral constant; prefer an enum instead
+// CHECK-MESSAGES: :[[@LINE-13]]:9: warning: macro 'EXPR10' defines an integral constant; prefer an enum instead
+// CHECK-MESSAGES: :[[@LINE-13]]:9: warning: macro 'EXPR11' defines an integral constant; prefer an enum instead
+// CHECK-MESSAGES: :[[@LINE-13]]:9: warning: macro 'EXPR12' defines an integral constant; prefer an enum instead
+// CHECK-FIXES: enum {
+// CHECK-FIXES-NEXT: EXPR1 = 1 - 1,
+// CHECK-FIXES-NEXT: EXPR2 = 1 + 1,
+// CHECK-FIXES-NEXT: EXPR3 = 1 * 1,
+// CHECK-FIXES-NEXT: EXPR4 = 1 / 1,
+// CHECK-FIXES-NEXT: EXPR5 = 1 | 1,
+// CHECK-FIXES-NEXT: EXPR6 = 1 & 1,
+// CHECK-FIXES-NEXT: EXPR7 = 1 << 1,
+// CHECK-FIXES-NEXT: EXPR8 = 1 >> 1,
+// CHECK-FIXES-NEXT: EXPR9 = 1 % 2,
+// CHECK-FIXES-NEXT: EXPR10 = 1 ^ 1,
+// CHECK-FIXES-NEXT: EXPR11 = (1 + (2)),
+// CHECK-FIXES-NEXT: EXPR12 = ((1) + (2 + 0) + (1 * 1) + (1 / 1) + (1 | 1 ) + (1 & 1) + (1 << 1) + (1 >> 1) + (1 % 2) + (1 ^ 1))
+// CHECK-FIXES-NEXT: };
+
 #define RED 0xFF0000
 #define GREEN 0x00FF00
 #define BLUE 0x0000FF
@@ -281,27 +322,14 @@ inline void used_ifndef() {}
 #define EPS2 1e5
 #define EPS3 1.
 
-#define DO_RED draw(RED)
-#define DO_GREEN draw(GREEN)
-#define DO_BLUE draw(BLUE)
-
-#define FN_RED(x) draw(RED | x)
-#define FN_GREEN(x) draw(GREEN | x)
-#define FN_BLUE(x) draw(BLUE | x)
-
 extern void draw(unsigned int Color);
 
 void f()
 {
+  // Usage of macros converted to enums should still compile.
   draw(RED);
-  draw(GREEN);
-  draw(BLUE);
-  DO_RED;
-  DO_GREEN;
-  DO_BLUE;
-  FN_RED(0);
-  FN_GREEN(0);
-  FN_BLUE(0);
+  draw(GREEN | RED);
+  draw(BLUE + RED);
 }
 
 // Ignore macros defined inside a top-level function definition.
@@ -342,7 +370,7 @@ template <int N>
 #define INSIDE9 9
 bool fn()
 {
-  #define INSIDE10 10
+#define INSIDE10 10
   return INSIDE9 > 1 || INSIDE10 < N;
 }
 
@@ -389,3 +417,17 @@ using Data2 =
 constexpr int
 #define INSIDE17 17
 value = INSIDE17;
+
+// Ignore macros used in the expansion of other macros
+#define INSIDE18 18
+#define INSIDE19 19
+
+#define CONCAT(n_, s_) n_##s_
+#define FN_NAME(n_, s_) CONCAT(n_, s_)
+
+extern void FN_NAME(g, INSIDE18)();
+
+void gg()
+{
+    g18();
+}

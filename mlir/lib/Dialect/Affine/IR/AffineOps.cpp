@@ -1076,9 +1076,9 @@ ParseResult AffineDmaStartOp::parse(OpAsmParser &parser,
     return failure();
 
   // Parse optional stride and elements per stride.
-  if (parser.parseTrailingOperandList(strideInfo)) {
+  if (parser.parseTrailingOperandList(strideInfo))
     return failure();
-  }
+
   if (!strideInfo.empty() && strideInfo.size() != 2) {
     return parser.emitError(parser.getNameLoc(),
                             "expected two stride related operands");
@@ -1432,9 +1432,10 @@ static ParseResult parseBound(bool isLower, OperationState &result,
 
 ParseResult AffineForOp::parse(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
-  OpAsmParser::UnresolvedOperand inductionVariable;
+  OpAsmParser::Argument inductionVariable;
+  inductionVariable.type = builder.getIndexType();
   // Parse the induction variable followed by '='.
-  if (parser.parseRegionArgument(inductionVariable) || parser.parseEqual())
+  if (parser.parseArgument(inductionVariable) || parser.parseEqual())
     return failure();
 
   // Parse loop bounds.
@@ -1463,8 +1464,10 @@ ParseResult AffineForOp::parse(OpAsmParser &parser, OperationState &result) {
   }
 
   // Parse the optional initial iteration arguments.
-  SmallVector<OpAsmParser::UnresolvedOperand, 4> regionArgs, operands;
-  SmallVector<Type, 4> argTypes;
+  SmallVector<OpAsmParser::Argument, 4> regionArgs;
+  SmallVector<OpAsmParser::UnresolvedOperand, 4> operands;
+
+  // Induction variable.
   regionArgs.push_back(inductionVariable);
 
   if (succeeded(parser.parseOptionalKeyword("iter_args"))) {
@@ -1473,23 +1476,23 @@ ParseResult AffineForOp::parse(OpAsmParser &parser, OperationState &result) {
         parser.parseArrowTypeList(result.types))
       return failure();
     // Resolve input operands.
-    for (auto operandType : llvm::zip(operands, result.types))
-      if (parser.resolveOperand(std::get<0>(operandType),
-                                std::get<1>(operandType), result.operands))
+    for (auto argOperandType :
+         llvm::zip(llvm::drop_begin(regionArgs), operands, result.types)) {
+      Type type = std::get<2>(argOperandType);
+      std::get<0>(argOperandType).type = type;
+      if (parser.resolveOperand(std::get<1>(argOperandType), type,
+                                result.operands))
         return failure();
+    }
   }
-  // Induction variable.
-  Type indexType = builder.getIndexType();
-  argTypes.push_back(indexType);
-  // Loop carried variables.
-  argTypes.append(result.types.begin(), result.types.end());
+
   // Parse the body region.
   Region *body = result.addRegion();
-  if (regionArgs.size() != argTypes.size())
+  if (regionArgs.size() != result.types.size() + 1)
     return parser.emitError(
         parser.getNameLoc(),
         "mismatch between the number of loop-carried values and results");
-  if (parser.parseRegion(*body, regionArgs, argTypes))
+  if (parser.parseRegion(*body, regionArgs))
     return failure();
 
   AffineForOp::ensureTerminator(*body, builder, result.location);
@@ -1548,7 +1551,8 @@ unsigned AffineForOp::getNumIterOperands() {
 
 void AffineForOp::print(OpAsmPrinter &p) {
   p << ' ';
-  p.printOperand(getBody()->getArgument(0));
+  p.printRegionArgument(getBody()->getArgument(0), /*argAttrs=*/{},
+                        /*omitType=*/true);
   p << " = ";
   printBound(getLowerBoundMapAttr(), getLowerBoundOperands(), "max", p);
   p << " to ";
@@ -3379,7 +3383,7 @@ void AffineParallelOp::print(OpAsmPrinter &p) {
 /// unique operands. Also populates `replacements with affine expressions of
 /// `kind` that can be used to update affine maps previously accepting a
 /// `operands` to accept `uniqueOperands` instead.
-static void deduplicateAndResolveOperands(
+static ParseResult deduplicateAndResolveOperands(
     OpAsmParser &parser,
     ArrayRef<SmallVector<OpAsmParser::UnresolvedOperand>> operands,
     SmallVectorImpl<Value> &uniqueOperands,
@@ -3390,7 +3394,8 @@ static void deduplicateAndResolveOperands(
   Type indexType = parser.getBuilder().getIndexType();
   for (const auto &list : operands) {
     SmallVector<Value> valueOperands;
-    parser.resolveOperands(list, indexType, valueOperands);
+    if (parser.resolveOperands(list, indexType, valueOperands))
+      return failure();
     for (Value operand : valueOperands) {
       unsigned pos = std::distance(uniqueOperands.begin(),
                                    llvm::find(uniqueOperands, operand));
@@ -3402,6 +3407,7 @@ static void deduplicateAndResolveOperands(
               : getAffineSymbolExpr(pos, parser.getContext()));
     }
   }
+  return success();
 }
 
 namespace {
@@ -3451,7 +3457,7 @@ static ParseResult parseAffineMapWithMinMax(OpAsmParser &parser,
   SmallVector<SmallVector<OpAsmParser::UnresolvedOperand>> flatSymOperands;
   SmallVector<int32_t> numMapsPerGroup;
   SmallVector<OpAsmParser::UnresolvedOperand> mapOperands;
-  do {
+  auto parseOperands = [&]() {
     if (succeeded(parser.parseOptionalKeyword(
             kind == MinMaxKind::Min ? "min" : "max"))) {
       mapOperands.clear();
@@ -3479,9 +3485,9 @@ static ParseResult parseAffineMapWithMinMax(OpAsmParser &parser,
         return failure();
       numMapsPerGroup.push_back(1);
     }
-  } while (succeeded(parser.parseOptionalComma()));
-
-  if (failed(parser.parseRParen()))
+    return success();
+  };
+  if (parser.parseCommaSeparatedList(parseOperands) || parser.parseRParen())
     return failure();
 
   unsigned totalNumDims = 0;
@@ -3499,10 +3505,11 @@ static ParseResult parseAffineMapWithMinMax(OpAsmParser &parser,
   // Deduplicate map operands.
   SmallVector<Value> dimOperands, symOperands;
   SmallVector<AffineExpr> dimRplacements, symRepacements;
-  deduplicateAndResolveOperands(parser, flatDimOperands, dimOperands,
-                                dimRplacements, AffineExprKind::DimId);
-  deduplicateAndResolveOperands(parser, flatSymOperands, symOperands,
-                                symRepacements, AffineExprKind::SymbolId);
+  if (deduplicateAndResolveOperands(parser, flatDimOperands, dimOperands,
+                                    dimRplacements, AffineExprKind::DimId) ||
+      deduplicateAndResolveOperands(parser, flatSymOperands, symOperands,
+                                    symRepacements, AffineExprKind::SymbolId))
+    return failure();
 
   result.operands.append(dimOperands.begin(), dimOperands.end());
   result.operands.append(symOperands.begin(), symOperands.end());
@@ -3527,9 +3534,8 @@ ParseResult AffineParallelOp::parse(OpAsmParser &parser,
                                     OperationState &result) {
   auto &builder = parser.getBuilder();
   auto indexType = builder.getIndexType();
-  SmallVector<OpAsmParser::UnresolvedOperand, 4> ivs;
-  if (parser.parseRegionArgumentList(ivs, /*requiredOperandCount=*/-1,
-                                     OpAsmParser::Delimiter::Paren) ||
+  SmallVector<OpAsmParser::Argument, 4> ivs;
+  if (parser.parseArgumentList(ivs, OpAsmParser::Delimiter::Paren) ||
       parser.parseEqual() ||
       parseAffineMapWithMinMax(parser, result, MinMaxKind::Max) ||
       parser.parseKeyword("to") ||
@@ -3570,7 +3576,7 @@ ParseResult AffineParallelOp::parse(OpAsmParser &parser,
   if (succeeded(parser.parseOptionalKeyword("reduce"))) {
     if (parser.parseLParen())
       return failure();
-    do {
+    auto parseAttributes = [&]() -> ParseResult {
       // Parse a single quoted string via the attribute parsing, and then
       // verify it is a member of the enum and convert to it's integer
       // representation.
@@ -3587,8 +3593,9 @@ ParseResult AffineParallelOp::parse(OpAsmParser &parser,
       reductions.push_back(builder.getI64IntegerAttr(
           static_cast<int64_t>(reduction.getValue())));
       // While we keep getting commas, keep parsing.
-    } while (succeeded(parser.parseOptionalComma()));
-    if (parser.parseRParen())
+      return success();
+    };
+    if (parser.parseCommaSeparatedList(parseAttributes) || parser.parseRParen())
       return failure();
   }
   result.addAttribute(AffineParallelOp::getReductionsAttrName(),
@@ -3600,8 +3607,9 @@ ParseResult AffineParallelOp::parse(OpAsmParser &parser,
 
   // Now parse the body.
   Region *body = result.addRegion();
-  SmallVector<Type, 4> types(ivs.size(), indexType);
-  if (parser.parseRegion(*body, ivs, types) ||
+  for (auto &iv : ivs)
+    iv.type = indexType;
+  if (parser.parseRegion(*body, ivs) ||
       parser.parseOptionalAttrDict(result.attributes))
     return failure();
 

@@ -99,6 +99,7 @@ class FLAT_Real <bits<7> op, FLAT_Pseudo ps> :
   let IsAtomicNoRet        = ps.IsAtomicNoRet;
   let VM_CNT               = ps.VM_CNT;
   let LGKM_CNT             = ps.LGKM_CNT;
+  let VALU                 = ps.VALU;
 
   // encoding fields
   bits<8> vaddr;
@@ -258,6 +259,7 @@ class FLAT_Global_Load_LDS_Pseudo <string opName, bit EnableSaddr = 0> : FLAT_Ps
   let mayStore = 1;
   let has_saddr = 1;
   let enabled_saddr = EnableSaddr;
+  let VALU = 1;
   let PseudoInstr = opName#!if(EnableSaddr, "_SADDR", "");
   let Uses = [M0, EXEC];
   let SchedRW = [WriteVMEM, WriteLDS];
@@ -418,6 +420,7 @@ class FLAT_Scratch_Load_LDS_Pseudo <string opName, bit EnableSaddr = 0,
   let has_vaddr = EnableVaddr;
   let has_sve = EnableSVE;
   let sve = EnableVaddr;
+  let VALU = 1;
   let PseudoInstr = opName#!if(EnableSVE, "_SVS", !if(EnableSaddr, "_SADDR", !if(EnableVaddr, "", "_ST")));
   let Uses = [M0, EXEC];
   let SchedRW = [WriteVMEM, WriteLDS];
@@ -898,23 +901,22 @@ let SubtargetPredicate = isGFX10Plus, is_flat_global = 1 in {
 } // End SubtargetPredicate = isGFX10Plus, is_flat_global = 1
 
 let is_flat_global = 1 in {
-let OtherPredicates = [HasAtomicFaddInsts] in {
+let OtherPredicates = [HasAtomicFaddNoRtnInsts] in
   defm GLOBAL_ATOMIC_ADD_F32 : FLAT_Global_Atomic_Pseudo_NO_RTN <
     "global_atomic_add_f32", VGPR_32, f32
   >;
+let OtherPredicates = [HasAtomicPkFaddNoRtnInsts] in
   defm GLOBAL_ATOMIC_PK_ADD_F16 : FLAT_Global_Atomic_Pseudo_NO_RTN <
     "global_atomic_pk_add_f16", VGPR_32, v2f16
   >;
-} // End OtherPredicates = [HasAtomicFaddInsts]
-
-let OtherPredicates = [isGFX90APlus] in {
+let OtherPredicates = [HasAtomicFaddRtnInsts] in
   defm GLOBAL_ATOMIC_ADD_F32 : FLAT_Global_Atomic_Pseudo_RTN <
     "global_atomic_add_f32", VGPR_32, f32
   >;
+let OtherPredicates = [isGFX90APlus] in
   defm GLOBAL_ATOMIC_PK_ADD_F16 : FLAT_Global_Atomic_Pseudo_RTN <
     "global_atomic_pk_add_f16", VGPR_32, v2f16
   >;
-} // End OtherPredicates = [isGFX90APlus]
 } // End is_flat_global = 1
 
 //===----------------------------------------------------------------------===//
@@ -1442,10 +1444,10 @@ defm : GlobalFLATAtomicIntrPats <"GLOBAL_ATOMIC_FMIN_X2", "int_amdgcn_global_ato
 defm : GlobalFLATAtomicIntrPats <"GLOBAL_ATOMIC_FMAX_X2", "int_amdgcn_global_atomic_fmax", f64>;
 }
 
-let OtherPredicates = [HasAtomicFaddInsts] in {
+let OtherPredicates = [HasAtomicFaddNoRtnInsts] in
 defm : GlobalFLATNoRtnAtomicPats <GLOBAL_ATOMIC_ADD_F32,    atomic_load_fadd_global_noret_32, f32>;
+let OtherPredicates = [HasAtomicPkFaddNoRtnInsts] in
 defm : GlobalFLATNoRtnAtomicPats <GLOBAL_ATOMIC_PK_ADD_F16, atomic_load_fadd_v2f16_global_noret_32, v2f16>;
-}
 
 let OtherPredicates = [isGFX90APlus] in {
 defm : GlobalFLATAtomicPats <"GLOBAL_ATOMIC_ADD_F32", "atomic_load_fadd_global", f32>;
