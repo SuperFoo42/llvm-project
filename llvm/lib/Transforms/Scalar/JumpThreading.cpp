@@ -317,7 +317,7 @@ bool JumpThreading::runOnFunction(Function &F) {
   std::unique_ptr<BlockFrequencyInfo> BFI;
   std::unique_ptr<BranchProbabilityInfo> BPI;
   if (F.hasProfileData()) {
-    LoopInfo LI{DominatorTree(F)};
+    LoopInfo LI{*DT};
     BPI.reset(new BranchProbabilityInfo(F, LI, TLI));
     BFI.reset(new BlockFrequencyInfo(F, *BPI, LI));
   }
@@ -1559,10 +1559,8 @@ findMostPopularDest(BasicBlock *BB,
       DestPopularity[PredToDest.second]++;
 
   // Find the most popular dest.
-  using VT = decltype(DestPopularity)::value_type;
   auto MostPopular = std::max_element(
-      DestPopularity.begin(), DestPopularity.end(),
-      [](const VT &L, const VT &R) { return L.second < R.second; });
+      DestPopularity.begin(), DestPopularity.end(), llvm::less_second());
 
   // Okay, we have finally picked the most popular destination.
   return MostPopular->first;

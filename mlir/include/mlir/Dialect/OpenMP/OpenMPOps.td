@@ -574,9 +574,19 @@ def FlushOp : OpenMP_Op<"flush"> {
     specified or implied.
   }];
 
-  let arguments = (ins Variadic<AnyType>:$varList);
+  let arguments = (ins Variadic<OpenMP_PointerLikeType>:$varList);
 
   let assemblyFormat = [{ ( `(` $varList^ `:` type($varList) `)` )? attr-dict}];
+  let extraClassDeclaration = [{
+    /// The number of variable operands.
+    unsigned getNumVariableOperands() {
+      return getOperation()->getNumOperands();
+    }
+    /// The i-th variable operand passed.
+    Value getVariableOperand(unsigned i) {
+      return getOperand(i);
+    }
+  }];
 }
 //===----------------------------------------------------------------------===//
 // 2.14.5 target construct
@@ -823,7 +833,7 @@ def AtomicReadOp : OpenMP_Op<"atomic.read", [AllTypesMatch<["x", "v"]>]> {
 
     /// The i-th variable operand passed.
     Value getVariableOperand(unsigned i) {
-      assert(0 <= i && i < 2 && "invalid index position for an operand");
+      assert(i < 2 && "invalid index position for an operand");
       return i == 0 ? x() : v();
     }
   }];
@@ -871,7 +881,7 @@ def AtomicWriteOp : OpenMP_Op<"atomic.write"> {
 
     /// The i-th variable operand passed.
     Value getVariableOperand(unsigned i) {
-      assert(0 <= i && i < 2 && "invalid index position for an operand");
+      assert(i < 2 && "invalid index position for an operand");
       return i == 0 ? address() : value();
     }
   }];

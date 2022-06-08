@@ -320,7 +320,6 @@ static NonLoc doRearrangeUnchecked(ProgramStateRef State,
   else
     llvm_unreachable("Operation not suitable for unchecked rearrangement!");
 
-  // FIXME: Can we use assume() without getting into an infinite recursion?
   if (LSym == RSym)
     return SVB.evalBinOpNN(State, Op, nonloc::ConcreteInt(LInt),
                            nonloc::ConcreteInt(RInt), ResultTy)
@@ -1190,7 +1189,6 @@ SVal SimpleSValBuilder::evalBinOpLN(ProgramStateRef state,
 
 const llvm::APSInt *SimpleSValBuilder::getKnownValue(ProgramStateRef state,
                                                    SVal V) {
-  V = simplifySVal(state, V);
   if (V.isUnknownOrUndef())
     return nullptr;
 
@@ -1278,8 +1276,6 @@ SVal SimpleSValBuilder::simplifySValOnce(ProgramStateRef State, SVal V) {
       return SVB.makeSymbolVal(S);
     }
 
-    // TODO: Support SymbolCast.
-
     SVal VisitSymIntExpr(const SymIntExpr *S) {
       auto I = Cached.find(S);
       if (I != Cached.end())
@@ -1349,7 +1345,17 @@ SVal SimpleSValBuilder::simplifySValOnce(ProgramStateRef State, SVal V) {
           S, SVB.evalBinOp(State, S->getOpcode(), LHS, RHS, S->getType()));
     }
 
-    // FIXME add VisitSymbolCast
+    SVal VisitSymbolCast(const SymbolCast *S) {
+      auto I = Cached.find(S);
+      if (I != Cached.end())
+        return I->second;
+      const SymExpr *OpSym = S->getOperand();
+      SVal OpVal = getConstOrVisit(OpSym);
+      if (isUnchanged(OpSym, OpVal))
+        return skip(S);
+
+      return cache(S, SVB.evalCast(OpVal, S->getType(), OpSym->getType()));
+    }
 
     SVal VisitUnarySymExpr(const UnarySymExpr *S) {
       auto I = Cached.find(S);
@@ -1376,14 +1382,6 @@ SVal SimpleSValBuilder::simplifySValOnce(ProgramStateRef State, SVal V) {
     SVal VisitSVal(SVal V) { return V; }
   };
 
-  // A crude way of preventing this function from calling itself from evalBinOp.
-  static bool isReentering = false;
-  if (isReentering)
-    return V;
-
-  isReentering = true;
   SVal SimplifiedV = Simplifier(State).Visit(V);
-  isReentering = false;
-
   return SimplifiedV;
 }

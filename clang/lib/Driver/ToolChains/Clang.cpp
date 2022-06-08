@@ -38,6 +38,7 @@
 #include "clang/Driver/SanitizerArgs.h"
 #include "clang/Driver/Types.h"
 #include "clang/Driver/XRayArgs.h"
+#include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Config/llvm-config.h"
 #include "llvm/Option/ArgList.h"
@@ -3477,13 +3478,16 @@ static void RenderOpenCLOptions(const ArgList &Args, ArgStringList &CmdArgs,
 
 static void RenderHLSLOptions(const ArgList &Args, ArgStringList &CmdArgs,
                               types::ID InputType) {
-  const unsigned ForwardedArguments[] = {options::OPT_dxil_validator_version,
-                                         options::OPT_S, options::OPT_emit_llvm,
-                                         options::OPT_disable_llvm_passes};
+  const unsigned ForwardedArguments[] = {
+      options::OPT_dxil_validator_version, options::OPT_D, options::OPT_S,
+      options::OPT_emit_llvm, options::OPT_disable_llvm_passes};
 
   for (const auto &Arg : ForwardedArguments)
     if (const auto *A = Args.getLastArg(Arg))
       A->renderAsInput(Args, CmdArgs);
+  // Add the default headers if dxc_no_stdinc is not set.
+  if (!Args.hasArg(options::OPT_dxc_no_stdinc))
+    CmdArgs.push_back("-finclude-default-header");
 }
 
 static void RenderARCMigrateToolOptions(const Driver &D, const ArgList &Args,
@@ -7452,6 +7456,12 @@ static EHFlags parseClangCLEHFlags(const Driver &D, const ArgList &Args) {
     EH.NoUnwindC = true;
   }
 
+  if (Args.hasArg(options::OPT__SLASH_kernel)) {
+    EH.Synch = false;
+    EH.NoUnwindC = false;
+    EH.Asynch = false;
+  }
+
   return EH;
 }
 
@@ -7596,6 +7606,27 @@ void Clang::AddClangCLArgs(const ArgList &Args, types::ID InputType,
    CmdArgs.push_back("-fno-wchar");
  }
 
+ if (Args.hasArg(options::OPT__SLASH_kernel)) {
+   llvm::Triple::ArchType Arch = getToolChain().getArch();
+   std::vector<std::string> Values =
+       Args.getAllArgValues(options::OPT__SLASH_arch);
+   if (!Values.empty()) {
+     llvm::SmallSet<std::string, 4> SupportedArches;
+     if (Arch == llvm::Triple::x86)
+       SupportedArches.insert("IA32");
+
+     for (auto &V : Values)
+       if (!SupportedArches.contains(V))
+         D.Diag(diag::err_drv_argument_not_allowed_with)
+             << std::string("/arch:").append(V) << "/kernel";
+   }
+
+   CmdArgs.push_back("-fno-rtti");
+   if (Args.hasFlag(options::OPT__SLASH_GR, options::OPT__SLASH_GR_, false))
+     D.Diag(diag::err_drv_argument_not_allowed_with) << "/GR"
+                                                     << "/kernel";
+ }
+
   Arg *MostGeneralArg = Args.getLastArg(options::OPT__SLASH_vmg);
   Arg *BestCaseArg = Args.getLastArg(options::OPT__SLASH_vmb);
   if (MostGeneralArg && BestCaseArg)
@@ -7664,6 +7695,9 @@ void Clang::AddClangCLArgs(const ArgList &Args, types::ID InputType,
     CmdArgs.push_back("-fdiagnostics-format");
     CmdArgs.push_back("msvc");
   }
+
+  if (Args.hasArg(options::OPT__SLASH_kernel))
+    CmdArgs.push_back("-fms-kernel");
 
   if (Arg *A = Args.getLastArg(options::OPT__SLASH_guard)) {
     StringRef GuardArgs = A->getValue();
