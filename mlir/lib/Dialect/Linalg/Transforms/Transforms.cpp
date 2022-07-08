@@ -337,6 +337,8 @@ void mlir::linalg::peelTiledLinalgOp(RewriterBase &rewriter, TiledLinalgOp &res,
                                      ArrayRef<int64_t> peeledLoops,
                                      LinalgTilingLoopType loopType) {
   for (int64_t loop : peeledLoops) {
+    if (res.loops.size() == 0)
+      continue;
     assert(loop < static_cast<int64_t>(res.loops.size()) &&
            "requested peeling of non-existing loop");
     SmallVector<Value, 4> loopResults;
