@@ -505,6 +505,19 @@ unsigned DWARFLinker::shouldKeepSubprogramDIE(
     return Flags;
   }
 
+  // TODO: Following check is a workaround for overlapping address ranges.
+  //       ELF binaries built with LTO might contain overlapping address
+  //       ranges. The better fix would be to combine such ranges. Following
+  //       is a workaround that should be removed when a good fix is done.
+  if (Unit.overlapsWithFunctionRanges(*LowPc, *HighPc)) {
+    reportWarning(
+        formatv("Overlapping address range [{0:X}, {1:X}]. Range will "
+                "be discarded.\n",
+                *LowPc, *HighPc),
+        File, &DIE);
+    return Flags;
+  }
+
   // Replace the debug map range with a more accurate one.
   Ranges[*LowPc] = ObjFileAddressRange(*HighPc, MyInfo.AddrAdjust);
   Unit.addFunctionRange(*LowPc, *HighPc, MyInfo.AddrAdjust);
@@ -1005,6 +1018,7 @@ void DWARFLinker::DIECloner::cloneExpression(
       // instead indicate the generic type. The same holds for
       // DW_OP_reinterpret, which is currently not supported.
       if (RefOffset > 0 || Op.getCode() != dwarf::DW_OP_convert) {
+        RefOffset += Unit.getOrigUnit().getOffset();
         auto RefDie = Unit.getOrigUnit().getDIEForOffset(RefOffset);
         CompileUnit::DIEInfo &Info = Unit.getInfo(RefDie);
         if (DIE *Clone = Info.Clone)

@@ -2682,7 +2682,7 @@ Instruction *InstCombinerImpl::visitCallInst(CallInst &CI) {
     // Handle target specific intrinsics
     Optional<Instruction *> V = targetInstCombineIntrinsic(*II);
     if (V)
-      return V.getValue();
+      return V.value();
     break;
   }
   }
@@ -3079,8 +3079,7 @@ Instruction *InstCombinerImpl::visitCallBase(CallBase &Call) {
             Call, Builder.CreateBitOrPointerCast(ReturnedArg, CallTy));
     }
 
-  if (isAllocationFn(&Call, &TLI) &&
-      isAllocRemovable(&cast<CallBase>(Call), &TLI))
+  if (isRemovableAlloc(&Call, &TLI))
     return visitAllocSite(Call);
 
   // Handle intrinsics which can be used in both call and invoke context.
@@ -3242,15 +3241,16 @@ bool InstCombinerImpl::transformConstExprCastCall(CallBase &Call) {
     // the call because there is no place to put the cast instruction (without
     // breaking the critical edge).  Bail out in this case.
     if (!Caller->use_empty()) {
-      if (InvokeInst *II = dyn_cast<InvokeInst>(Caller))
-        for (User *U : II->users())
+      BasicBlock *PhisNotSupportedBlock = nullptr;
+      if (auto *II = dyn_cast<InvokeInst>(Caller))
+        PhisNotSupportedBlock = II->getNormalDest();
+      if (auto *CB = dyn_cast<CallBrInst>(Caller))
+        PhisNotSupportedBlock = CB->getDefaultDest();
+      if (PhisNotSupportedBlock)
+        for (User *U : Caller->users())
           if (PHINode *PN = dyn_cast<PHINode>(U))
-            if (PN->getParent() == II->getNormalDest() ||
-                PN->getParent() == II->getUnwindDest())
+            if (PN->getParent() == PhisNotSupportedBlock)
               return false;
-      // FIXME: Be conservative for callbr to avoid a quadratic search.
-      if (isa<CallBrInst>(Caller))
-        return false;
     }
   }
 

@@ -26,6 +26,11 @@ def SDT_LoongArchIntBinOpW : SDTypeProfile<1, 2, [
   SDTCisSameAs<0, 1>, SDTCisSameAs<0, 2>, SDTCisVT<0, i64>
 ]>;
 
+def SDT_LoongArchBStrIns: SDTypeProfile<1, 4, [
+  SDTCisInt<0>, SDTCisSameAs<0, 1>, SDTCisSameAs<0, 2>, SDTCisInt<3>,
+  SDTCisSameAs<3, 4>
+]>;
+
 def SDT_LoongArchBStrPick: SDTypeProfile<1, 3, [
   SDTCisInt<0>, SDTCisSameAs<0, 1>, SDTCisInt<2>, SDTCisSameAs<2, 3>
 ]>;
@@ -46,6 +51,8 @@ def loongarch_ret : SDNode<"LoongArchISD::RET", SDTNone,
 def loongarch_sll_w : SDNode<"LoongArchISD::SLL_W", SDT_LoongArchIntBinOpW>;
 def loongarch_sra_w : SDNode<"LoongArchISD::SRA_W", SDT_LoongArchIntBinOpW>;
 def loongarch_srl_w : SDNode<"LoongArchISD::SRL_W", SDT_LoongArchIntBinOpW>;
+def loongarch_bstrins
+    : SDNode<"LoongArchISD::BSTRINS", SDT_LoongArchBStrIns>;
 def loongarch_bstrpick
     : SDNode<"LoongArchISD::BSTRPICK", SDT_LoongArchBStrPick>;
 
@@ -590,6 +597,9 @@ def shiftMaskGRLen
     : ComplexPattern<GRLenVT, 1, "selectShiftMaskGRLen", [], [], 0>;
 def shiftMask32 : ComplexPattern<i64, 1, "selectShiftMask32", [], [], 0>;
 
+def sexti32 : ComplexPattern<i64, 1, "selectSExti32">;
+def zexti32 : ComplexPattern<i64, 1, "selectZExti32">;
+
 class shiftop<SDPatternOperator operator>
     : PatFrag<(ops node:$val, node:$count),
               (operator node:$val, (GRLenVT (shiftMaskGRLen node:$count)))>;
@@ -605,6 +615,9 @@ def : PatGprGpr<sdiv, DIV_W>;
 def : PatGprGpr<udiv, DIV_WU>;
 def : PatGprGpr<srem, MOD_W>;
 def : PatGprGpr<urem, MOD_WU>;
+def : PatGprGpr<mul, MUL_W>;
+def : PatGprGpr<mulhs, MULH_W>;
+def : PatGprGpr<mulhu, MULH_WU>;
 } // Predicates = [IsLA32]
 
 let Predicates = [IsLA64] in {
@@ -618,6 +631,20 @@ def : PatGprGpr<sdiv, DIV_D>;
 def : PatGprGpr<udiv, DIV_DU>;
 def : PatGprGpr<srem, MOD_D>;
 def : PatGprGpr<urem, MOD_DU>;
+// TODO: Select "_W[U]" instructions for i32xi32 if only lower 32 bits of the
+// product are used.
+def : PatGprGpr<mul, MUL_D>;
+def : PatGprGpr<mulhs, MULH_D>;
+def : PatGprGpr<mulhu, MULH_DU>;
+// Select MULW_D_W for calculating the full 64 bits product of i32xi32 signed
+// multiplication.
+def : Pat<(i64 (mul (sext_inreg GPR:$rj, i32), (sext_inreg GPR:$rk, i32))),
+          (MULW_D_W GPR:$rj, GPR:$rk)>;
+// Select MULW_D_WU for calculating the full 64 bits product of i32xi32
+// unsigned multiplication.
+def : Pat<(i64 (mul (loongarch_bstrpick GPR:$rj, (i64 31), (i64 0)),
+                    (loongarch_bstrpick GPR:$rk, (i64 31), (i64 0)))),
+          (MULW_D_WU GPR:$rj, GPR:$rk)>;
 } // Predicates = [IsLA64]
 
 def : PatGprGpr<and, AND>;
@@ -757,15 +784,21 @@ let isBarrier = 1, isReturn = 1, isTerminator = 1 in
 def PseudoRET : Pseudo<(outs), (ins), [(loongarch_ret)]>,
                 PseudoInstExpansion<(JIRL R0, R1, 0)>;
 
-/// BSTRPICK
+/// BSTRINS and BSTRPICK
 
-let Predicates = [IsLA32] in
+let Predicates = [IsLA32] in {
+def : Pat<(loongarch_bstrins GPR:$rd, GPR:$rj, uimm5:$msbd, uimm5:$lsbd),
+          (BSTRINS_W GPR:$rd, GPR:$rj, uimm5:$msbd, uimm5:$lsbd)>;
 def : Pat<(loongarch_bstrpick GPR:$rj, uimm5:$msbd, uimm5:$lsbd),
           (BSTRPICK_W GPR:$rj, uimm5:$msbd, uimm5:$lsbd)>;
+} // Predicates = [IsLA32]
 
-let Predicates = [IsLA64] in
+let Predicates = [IsLA64] in {
+def : Pat<(loongarch_bstrins GPR:$rd, GPR:$rj, uimm6:$msbd, uimm6:$lsbd),
+          (BSTRINS_D GPR:$rd, GPR:$rj, uimm6:$msbd, uimm6:$lsbd)>;
 def : Pat<(loongarch_bstrpick GPR:$rj, uimm6:$msbd, uimm6:$lsbd),
           (BSTRPICK_D GPR:$rj, uimm6:$msbd, uimm6:$lsbd)>;
+} // Predicates = [IsLA64]
 
 /// Loads
 
@@ -805,6 +838,23 @@ defm : StPat<store, ST_W, GPR, i32>, Requires<[IsLA32]>;
 let Predicates = [IsLA64] in {
 defm : StPat<truncstorei32, ST_W, GPR, i64>;
 defm : StPat<store, ST_D, GPR, i64>;
+} // Predicates = [IsLA64]
+
+/// Atomic loads and stores
+
+def : Pat<(atomic_fence timm, timm), (DBAR 0)>;
+
+defm : LdPat<atomic_load_8, LD_B>;
+defm : LdPat<atomic_load_16, LD_H>;
+defm : LdPat<atomic_load_32, LD_W>;
+
+defm : StPat<atomic_store_8, ST_B, GPR, GRLenVT>;
+defm : StPat<atomic_store_16, ST_H, GPR, GRLenVT>;
+defm : StPat<atomic_store_32, ST_W, GPR, i32>, Requires<[IsLA32]>;
+let Predicates = [IsLA64] in {
+defm : LdPat<atomic_load_64, LD_D>;
+defm : StPat<atomic_store_32, ST_W, GPR, i64>;
+defm : StPat<atomic_store_64, ST_D, GPR, i64>;
 } // Predicates = [IsLA64]
 
 /// Other pseudo-instructions

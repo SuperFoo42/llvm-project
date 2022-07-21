@@ -266,6 +266,27 @@ mlir::test::TestMixedNullAndNonNullResultsOp::applyToOne(
   return DiagnosedSilenceableFailure::success();
 }
 
+DiagnosedSilenceableFailure
+mlir::test::TestMixedSuccessAndSilenceableOp::applyToOne(
+    Operation *target, SmallVectorImpl<Operation *> &results,
+    transform::TransformState &state) {
+  if (target->hasAttr("target_me"))
+    return DiagnosedSilenceableFailure::success();
+  return emitDefaultSilenceableFailure(target);
+}
+
+DiagnosedSilenceableFailure
+mlir::test::TestPrintNumberOfAssociatedPayloadIROps::apply(
+    transform::TransformResults &results, transform::TransformState &state) {
+  emitRemark() << state.getPayloadOps(getHandle()).size();
+  return DiagnosedSilenceableFailure::success();
+}
+
+void mlir::test::TestPrintNumberOfAssociatedPayloadIROps::getEffects(
+    SmallVectorImpl<MemoryEffects::EffectInstance> &effects) {
+  transform::onlyReadsHandle(getHandle(), effects);
+}
+
 namespace {
 /// Test extension of the Transform dialect. Registers additional ops and
 /// declares PDL as dependent dialect since the additional ops are using PDL

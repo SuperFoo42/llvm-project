@@ -545,3 +545,55 @@ transform.with_pdl_patterns {
     test_print_remark_at_operand %2, "matched"
   }
 }
+
+// -----
+
+func.func @foo() {
+  "op" () { target_me } : () -> ()
+  "op" () : () -> ()
+  return
+}
+
+transform.with_pdl_patterns {
+^bb0(%arg0: !pdl.operation):
+  pdl.pattern @some : benefit(1) {
+    %0 = pdl.operands
+    %1 = pdl.types
+    %2 = pdl.operation "op"(%0 : !pdl.range<value>) -> (%1 : !pdl.range<type>)
+    pdl.rewrite %2 with "transform.dialect"
+  }
+
+  transform.sequence %arg0 {
+  ^bb0(%arg1: !pdl.operation):
+    %0 = pdl_match @some in %arg1
+    transform.test_mixed_sucess_and_silenceable %0
+  }
+}
+
+// -----
+
+module {
+  func.func private @foo()
+  func.func private @bar()
+
+  transform.with_pdl_patterns {
+  ^bb0(%arg0: !pdl.operation):
+    pdl.pattern @func : benefit(1) {
+      %0 = pdl.operands
+      %1 = pdl.types
+      %2 = pdl.operation "func.func"(%0 : !pdl.range<value>) -> (%1 : !pdl.range<type>)
+      pdl.rewrite %2 with "transform.dialect"
+    }
+
+    transform.sequence %arg0 {
+    ^bb0(%arg1: !pdl.operation):
+      %0 = pdl_match @func in %arg1
+      %1 = replicate num(%0) %arg1
+      // expected-remark @below {{2}}
+      test_print_number_of_associated_payload_ir_ops %1
+      %2 = replicate num(%0) %1
+      // expected-remark @below {{4}}
+      test_print_number_of_associated_payload_ir_ops %2
+    }
+  }
+}
