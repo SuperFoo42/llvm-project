@@ -290,7 +290,7 @@ void LinkerDriver::addFile(StringRef path, bool withLOption) {
 // Add a given library by searching it from input search paths.
 void LinkerDriver::addLibrary(StringRef name) {
   if (Optional<std::string> path = searchLibrary(name))
-    addFile(*path, /*withLOption=*/true);
+    addFile(saver().save(*path), /*withLOption=*/true);
   else
     error("unable to find library -l" + name, ErrorTag::LibNotFound, {name});
 }
@@ -2779,9 +2779,6 @@ void LinkerDriver::link(opt::InputArgList &args) {
     for (SectionCommand *cmd : script->sectionCommands)
       if (auto *osd = dyn_cast<OutputDesc>(cmd))
         osd->osec.finalizeInputSections();
-    llvm::erase_if(inputSections, [](InputSectionBase *s) {
-      return isa<MergeInputSection>(s);
-    });
   }
 
   // Two input sections with different output sections should not be folded.
