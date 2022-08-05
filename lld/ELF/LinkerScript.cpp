@@ -848,7 +848,8 @@ void LinkerScript::addOrphanSections() {
   // for synthetic sections because them are special.
   size_t n = 0;
   for (InputSectionBase *isec : inputSections) {
-    if (!isa<MergeInputSection>(isec))
+    // Process InputSection and MergeInputSection.
+    if (LLVM_LIKELY(isa<InputSection>(isec)))
       inputSections[n++] = isec;
 
     // In -r links, SHF_LINK_ORDER sections are added while adding their parent
@@ -867,6 +868,7 @@ void LinkerScript::addOrphanSections() {
         if (depSec->flags & SHF_LINK_ORDER)
           add(depSec);
   }
+  // Keep just InputSection.
   inputSections.resize(n);
 
   // If no SECTIONS command was given, we should insert sections commands

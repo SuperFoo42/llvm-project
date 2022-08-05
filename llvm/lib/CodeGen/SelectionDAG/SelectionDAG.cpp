@@ -1341,7 +1341,8 @@ void SelectionDAG::clear() {
 SDValue SelectionDAG::getFPExtendOrRound(SDValue Op, const SDLoc &DL, EVT VT) {
   return VT.bitsGT(Op.getValueType())
              ? getNode(ISD::FP_EXTEND, DL, VT, Op)
-             : getNode(ISD::FP_ROUND, DL, VT, Op, getIntPtrConstant(0, DL));
+             : getNode(ISD::FP_ROUND, DL, VT, Op,
+                       getIntPtrConstant(0, DL, /*isTarget=*/true));
 }
 
 std::pair<SDValue, SDValue>
@@ -1894,7 +1895,7 @@ SDValue SelectionDAG::getVectorShuffle(EVT VT, const SDLoc &dl, SDValue N1,
          "Index out of range");
 
   // Copy the mask so we can do any needed cleanup.
-  SmallVector<int, 8> MaskVec(Mask.begin(), Mask.end());
+  SmallVector<int, 8> MaskVec(Mask);
 
   // Canonicalize shuffle v, v -> v, undef
   if (N1 == N2) {
@@ -2050,7 +2051,7 @@ SDValue SelectionDAG::getVectorShuffle(EVT VT, const SDLoc &dl, SDValue N1,
 
 SDValue SelectionDAG::getCommutedVectorShuffle(const ShuffleVectorSDNode &SV) {
   EVT VT = SV.getValueType(0);
-  SmallVector<int, 8> MaskVec(SV.getMask().begin(), SV.getMask().end());
+  SmallVector<int, 8> MaskVec(SV.getMask());
   ShuffleVectorSDNode::commuteMask(MaskVec);
 
   SDValue Op0 = SV.getOperand(0);
@@ -3293,13 +3294,11 @@ KnownBits SelectionDAG::computeKnownBits(SDValue Op, const APInt &DemandedElts,
     assert((Op.getResNo() == 0 || Op.getResNo() == 1) && "Unknown result");
 
     // Collect lo/hi source values and concatenate.
-    // TODO: Would a KnownBits::concatBits helper be useful?
     unsigned LoBits = Op.getOperand(0).getScalarValueSizeInBits();
     unsigned HiBits = Op.getOperand(1).getScalarValueSizeInBits();
     Known = computeKnownBits(Op.getOperand(0), DemandedElts, Depth + 1);
     Known2 = computeKnownBits(Op.getOperand(1), DemandedElts, Depth + 1);
-    Known = Known.anyext(LoBits + HiBits);
-    Known.insertBits(Known2, LoBits);
+    Known = Known2.concat(Known);
 
     // Collect shift amount.
     Known2 = computeKnownBits(Op.getOperand(2), DemandedElts, Depth + 1);
