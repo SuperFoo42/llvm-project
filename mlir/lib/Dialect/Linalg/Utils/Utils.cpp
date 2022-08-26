@@ -555,13 +555,13 @@ void GenerateLoopNest<scf::ForOp>::doit(
 
 /// Specialization to build affine "for" nest.
 template <>
-void GenerateLoopNest<AffineForOp>::doit(
-    OpBuilder &b, Location loc, ArrayRef<Range> loopRanges, LinalgOp linalgOp,
-    ArrayRef<Attribute> iteratorTypes,
-    function_ref<scf::ValueVector(OpBuilder &, Location, ValueRange,
-                                  llvm::SmallDenseMap<OpOperand *, Value>)>
-        bodyBuilderFn,
-    ArrayRef<linalg::ProcInfo> /*procInfo*/) {
+void GenerateLoopNest<AffineForOp>::doit(OpBuilder &b, Location loc, ArrayRef<Range> loopRanges,
+                                         LinalgOp linalgOp, ArrayRef<Attribute> iteratorTypes,
+                                         function_ref<scf::ValueVector(OpBuilder &, Location,
+                                                                       ValueRange, llvm::SmallDenseMap<OpOperand *, Value>)>
+                                         bodyBuilderFn,
+                                         Optional<LinalgLoopDistributionOptions>,
+                                         ArrayRef<StringRef> distributionTypes) {
   SmallVector<Value> iterArgInitValues = linalgOp.getOutputTensorOperands();
   assert(iterArgInitValues.empty() && "unexpected AffineForOp init values");
   SmallVector<Value, 4> lbs, ubs, steps;
@@ -613,7 +613,7 @@ void GenerateLoopNest<AffineForOp>::doit(
               }
                bodyBuilderFn(b, loc, loop_var, iterArgMapping);
              })
-            .results();
+            .getResults();
 
     // store reduction results from iter args
     for (auto &en : llvm::enumerate(llvm::zip(res, memrefValueMapping))) {

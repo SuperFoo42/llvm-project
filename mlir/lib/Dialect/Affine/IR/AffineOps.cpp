@@ -293,7 +293,7 @@ bool mlir::isValidDim(Value value, Region *region) {
     // This value has to be a block argument for an affine.for or an
     // affine.parallel.
     auto *parentOp = value.cast<BlockArgument>().getOwner()->getParentOp();
-    return isa<AffineForOp, AffineParallelOp, linalg::TiledLoopOp>(parentOp); //FIXME:shitfix to also allow linalg tiled loop arguments
+    return isa<AffineForOp, AffineParallelOp>(parentOp); //FIXME:shitfix to also allow linalg tiled loop arguments
   }
 
   // Affine apply operation is ok if all of its operands are ok.

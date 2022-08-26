@@ -467,7 +467,7 @@ static ParallelComputeFunction createParallelComputeFunction(
 
       for (auto &bodyOp : op.getLoopBody().getOps())
         b.clone(bodyOp, mapping);
-            auto *tmp = nb.clone(redBop, reductionMapping);
+            auto *tmp = b.clone(redBop, reductionMapping);
 
             arith::AtomicRMWKind rmw;
             if (isa<arith::AddIOp>(redBop)) {
@@ -505,10 +505,10 @@ static ParallelComputeFunction createParallelComputeFunction(
             }
           }
         } else if (!isa<scf::YieldOp>(bodyOp))
-          nb.clone(bodyOp, mapping);
+          b.clone(bodyOp, mapping);
       }
 
-      nb.create<scf::YieldOp>(resVals);
+      b.create<scf::YieldOp>(resVals);
     };
   };
 
@@ -541,7 +541,7 @@ static ParallelComputeFunction createParallelComputeFunction(
   }
 
   // TODO: for general reductions, use return values?
-  b.create<ReturnOp>(ValueRange());
+  b.create<mlir::func::ReturnOp>(ValueRange());
 
   return {op.getNumLoops(), func, std::move(computeFuncType.captures)};
 }
@@ -1016,8 +1016,8 @@ AsyncParallelForRewrite::matchAndRewrite(scf::ParallelOp op,
       ParallelComputeFunction compute = createParallelComputeFunction(
           op, staticBounds, numUnrollableLoops, rewriter);
       // add reduction memrefs
-      unrollableParallelComputeFunction.captures.insert(
-          unrollableParallelComputeFunction.captures.end(),
+      notUnrollableParallelComputeFunction.captures.insert(
+          notUnrollableParallelComputeFunction.captures.end(),
           resultMemRefs.begin(), resultMemRefs.end());
 
       ImplicitLocOpBuilder b(loc, nestedBuilder);

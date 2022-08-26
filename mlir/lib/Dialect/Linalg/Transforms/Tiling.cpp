@@ -748,7 +748,6 @@ struct LinalgTilingPass : public LinalgTilingBase<LinalgTilingPass> {
   LinalgTilingPass() = default;
   LinalgTilingPass(ArrayRef<int64_t> tileSizes, LinalgTilingLoopType loopType) {
     this->tileSizes = tileSizes;
-    this->peeledLoops = peeledLoops;
     this->loopType = "";
     this->loopTypeEnum = loopType;
   }
