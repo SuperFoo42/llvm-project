@@ -1423,11 +1423,11 @@ struct FormatStyle {
     /// Wrap class definitions.
     /// \code
     ///   true:
-    ///   class foo {};
-    ///
-    ///   false:
     ///   class foo
     ///   {};
+    ///
+    ///   false:
+    ///   class foo {};
     /// \endcode
     bool AfterClass;
 
@@ -1775,7 +1775,7 @@ struct FormatStyle {
     /// Change specifiers/qualifiers to be aligned based on ``QualifierOrder``.
     /// With:
     /// \code{.yaml}
-    ///   QualifierOrder: ['inline', 'static' , 'type', 'const']
+    ///   QualifierOrder: ['inline', 'static', 'type', 'const']
     /// \endcode
     ///
     /// \code
