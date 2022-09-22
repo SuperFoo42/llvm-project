@@ -107,6 +107,14 @@
 // RUN:             | FileCheck -check-prefix=CI %s
 // RUN: %clang -### -c %s -gsce -target x86_64-unknown-linux 2>&1 \
 // RUN:             | FileCheck -check-prefix=NOCI %s
+// RUN: %clang -### %s -g -flto=thin -target x86_64-scei-ps4 2>&1 \
+// RUN:             | FileCheck -check-prefix=SNLDTLTOGARANGE %s
+// RUN: %clang -### %s -g -flto=full -target x86_64-scei-ps4 2>&1 \
+// RUN:             | FileCheck -check-prefix=SNLDFLTOGARANGE %s
+// RUN: %clang -### %s -g -flto -target x86_64-scei-ps5 2>&1 \
+// RUN:             | FileCheck -check-prefix=LLDGARANGE %s
+// RUN: %clang -### %s -g -target x86_64-scei-ps5 2>&1 \
+// RUN:             | FileCheck -check-prefix=LDGARANGE %s
 
 // On the AIX, -g defaults to -gdbx and limited debug info.
 // RUN: %clang -### -c -g %s -target powerpc-ibm-aix-xcoff 2>&1 \
@@ -246,11 +254,7 @@
 // RUN: %clang -### -c -glldb %s 2>&1 | FileCheck -check-prefix=NOPUB %s
 // RUN: %clang -### -c -glldb -gno-pubnames %s 2>&1 | FileCheck -check-prefix=NOPUB %s
 //
-// RUN: %clang -### -target x86_64-unknown-linux -c -gdwarf-aranges %s 2>&1 | FileCheck -check-prefix=GARANGE %s
-// RUN: %clang -### -target x86_64-unknown-linux -flto -gdwarf-aranges %s 2>&1 | FileCheck -check-prefix=LDGARANGE %s
-// RUN: %clang -### -target x86_64-unknown-linux -flto=thin -gdwarf-aranges %s 2>&1 | FileCheck -check-prefix=LDGARANGE %s
-// RUN: %clang -### -target x86_64-unknown-linux -fuse-ld=lld -flto -gdwarf-aranges %s 2>&1 | FileCheck -check-prefix=LLDGARANGE %s
-// RUN: %clang -### -target x86_64-unknown-linux -fuse-ld=lld -flto=thin -gdwarf-aranges %s 2>&1 | FileCheck -check-prefix=LLDGARANGE %s
+// RUN: %clang -### -c -gdwarf-aranges %s 2>&1 | FileCheck -check-prefix=GARANGE %s
 //
 // RUN: %clang -### -fdebug-types-section -target x86_64-unknown-linux %s 2>&1 \
 // RUN:        | FileCheck -check-prefix=FDTS %s
@@ -369,14 +373,19 @@
 // NOPUB-NOT: -ggnu-pubnames
 // NOPUB-NOT: -gpubnames
 //
+
+// LDGARANGE: {{".*ld.*"}} {{.*}}
+// LDGARANGE-NOT: "-generate-arange-section"
+// LLDGARANGE: {{".*lld.*"}} {{.*}} "-generate-arange-section"
+// SNLDTLTOGARANGE: {{".*orbis-ld.*"}} {{.*}} "-lto-thin-debug-options=-generate-arange-section"
+// SNLDFLTOGARANGE: {{".*orbis-ld.*"}} {{.*}} "-lto-debug-options=-generate-arange-section"
+
 // PUB: -gpubnames
 //
 // RNGBSE: -fdebug-ranges-base-address
 // NORNGBSE-NOT: -fdebug-ranges-base-address
 //
 // GARANGE-DAG: -generate-arange-section
-// LDGARANGE-NOT: {{".*lld.*"}} {{.*}} "-generate-arange-section"
-// LLDGARANGE: {{".*lld.*"}} {{.*}} "-generate-arange-section"
 //
 // FDTS: "-mllvm" "-generate-type-units"
 // FDTSE: error: unsupported option '-fdebug-types-section' for target 'x86_64-apple-darwin'

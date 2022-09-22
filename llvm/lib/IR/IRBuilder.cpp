@@ -593,7 +593,7 @@ CallInst *IRBuilderBase::CreateMaskedLoad(Type *Ty, Value *Ptr, Align Alignment,
   assert(PtrTy->isOpaqueOrPointeeTypeMatches(Ty) && "Wrong element type");
   assert(Mask && "Mask should not be all-ones (null)");
   if (!PassThru)
-    PassThru = UndefValue::get(Ty);
+    PassThru = PoisonValue::get(Ty);
   Type *OverloadedTypes[] = { Ty, PtrTy };
   Value *Ops[] = {Ptr, getInt32(Alignment.value()), Mask, PassThru};
   return CreateMaskedIntrinsic(Intrinsic::masked_load, Ops,
@@ -657,7 +657,7 @@ CallInst *IRBuilderBase::CreateMaskedGather(Type *Ty, Value *Ptrs,
         VectorType::get(Type::getInt1Ty(Context), NumElts));
 
   if (!PassThru)
-    PassThru = UndefValue::get(Ty);
+    PassThru = PoisonValue::get(Ty);
 
   Type *OverloadedTypes[] = {Ty, PtrsTy};
   Value *Ops[] = {Ptrs, getInt32(Alignment.value()), Mask, PassThru};
@@ -698,6 +698,53 @@ CallInst *IRBuilderBase::CreateMaskedScatter(Value *Data, Value *Ptrs,
   // We specify only one type when we create this intrinsic. Types of other
   // arguments are derived from this type.
   return CreateMaskedIntrinsic(Intrinsic::masked_scatter, Ops, OverloadedTypes);
+}
+
+/// Create a call to Masked Expand Load intrinsic
+/// \p Ty        - vector type to load
+/// \p Ptr       - base pointer for the load
+/// \p Mask      - vector of booleans which indicates what vector lanes should
+///                be accessed in memory
+/// \p PassThru  - pass-through value that is used to fill the masked-off lanes
+///                of the result
+/// \p Name      - name of the result variable
+CallInst *IRBuilderBase::CreateMaskedExpandLoad(Type *Ty, Value *Ptr,
+                                                Value *Mask, Value *PassThru,
+                                                const Twine &Name) {
+  auto *PtrTy = cast<PointerType>(Ptr->getType());
+  assert(Ty->isVectorTy() && "Type should be vector");
+  assert(PtrTy->isOpaqueOrPointeeTypeMatches(
+             cast<FixedVectorType>(Ty)->getElementType()) &&
+         "Wrong element type");
+  (void)PtrTy;
+  assert(Mask && "Mask should not be all-ones (null)");
+  if (!PassThru)
+    PassThru = PoisonValue::get(Ty);
+  Type *OverloadedTypes[] = {Ty};
+  Value *Ops[] = {Ptr, Mask, PassThru};
+  return CreateMaskedIntrinsic(Intrinsic::masked_expandload, Ops,
+                               OverloadedTypes, Name);
+}
+
+/// Create a call to Masked Compress Store intrinsic
+/// \p Val       - data to be stored,
+/// \p Ptr       - base pointer for the store
+/// \p Mask      - vector of booleans which indicates what vector lanes should
+///                be accessed in memory
+CallInst *IRBuilderBase::CreateMaskedCompressStore(Value *Val, Value *Ptr,
+                                                   Value *Mask) {
+  auto *PtrTy = cast<PointerType>(Ptr->getType());
+  Type *DataTy = Val->getType();
+  assert(DataTy->isVectorTy() && "Val should be a vector");
+  assert(PtrTy->isOpaqueOrPointeeTypeMatches(
+             cast<FixedVectorType>(DataTy)->getElementType()) &&
+         "Wrong element type");
+  (void)PtrTy;
+  assert(Mask && "Mask should not be all-ones (null)");
+  Type *OverloadedTypes[] = {DataTy};
+  Value *Ops[] = {Val, Ptr, Mask};
+  return CreateMaskedIntrinsic(Intrinsic::masked_compressstore, Ops,
+                               OverloadedTypes);
 }
 
 template <typename T0>
