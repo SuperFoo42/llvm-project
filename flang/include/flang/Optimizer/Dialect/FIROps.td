@@ -105,7 +105,7 @@ def fir_AllocaOp : fir_Op<"alloca", [AttrSizedOperandSegments,
     constant `1`, then pass that by reference to foo. Likewise for the second
     and third calls to foo, each stack slot being initialized accordingly. It is
     also a conforming implementation to reuse the same stack slot for all three
-    calls, just initializing each in turn. This is possible  as the lifetime of
+    calls, just initializing each in turn. This is possible as the lifetime of
     the copy of each constant need not exceed that of the CALL statement.
     Indeed, a user would likely expect a good Fortran compiler to perform such
     an optimization.
@@ -343,7 +343,6 @@ def fir_SaveResultOp : fir_Op<"save_result", [AttrSizedOperandSegments]> {
 
     The above fir.save_result allows saving a fir.array function result into
     a buffer to later access its 5th element.
-
   }];
 
   let arguments = (ins ArrayOrBoxOrRecord:$value,
@@ -410,7 +409,7 @@ def fir_UndefOp : fir_OneResultOp<"undefined", [NoSideEffect]> {
       %a = fir.undefined !fir.array<10 x !fir.type<T>>
     ```
 
-    The example creates an array shaped ssa value. The array is rank 1, extent
+    The example creates an array shaped ssa-value. The array is rank 1, extent
     10, and each element has type `!fir.type<T>`.
   }];
 
@@ -734,7 +733,7 @@ def fir_EmboxOp : fir_Op<"embox", [NoSideEffect, AttrSizedOperandSegments]> {
   let description = [{
     Create a boxed reference value. In Fortran, the implementation can require
     extra information about an entity, such as its type, rank, etc.  This
-    auxilliary information is packaged and abstracted as a value with box type
+    auxiliary information is packaged and abstracted as a value with box type
     by the calling routine. (In Fortran, these are called descriptors.)
 
     ```mlir
@@ -762,7 +761,7 @@ def fir_EmboxOp : fir_Op<"embox", [NoSideEffect, AttrSizedOperandSegments]> {
     OptionalAttr<AffineMapAttr>:$accessMap
   );
 
-  let results = (outs fir_BoxType);
+  let results = (outs BoxOrClassType);
 
   let builders = [
     OpBuilder<(ins "llvm::ArrayRef<mlir::Type>":$resultTypes,
@@ -820,7 +819,6 @@ def fir_ReboxOp : fir_Op<"rebox", [NoSideEffect, AttrSizedOperandSegments]> {
       %3 = fir.shape %c3, %c4 : (index, index) -> !fir.shape<2>
       %4 = fir.rebox %2(%3) : (!fir.box<!fir.array<?xf32>>, !fir.shape<2>) -> !fir.box<!fir.array<?x?xf32>>
     ```
-
   }];
 
   let arguments = (ins
@@ -1029,8 +1027,8 @@ def fir_BoxEleSizeOp : fir_SimpleOneResultOp<"box_elesize", [NoSideEffect]> {
     not be known until runtime.
 
     ```mlir
-      %53 = fir.box_elesize %40 : (!fir.box<f32>, i32) -> i32  // size=4
-      %54 = fir.box_elesize %40 : (!fir.box<!fir.array<*:f32>>, i32) -> i32
+      %53 = fir.box_elesize %40 : (!fir.box<f32>) -> i32  // size=4
+      %54 = fir.box_elesize %40 : (!fir.box<!fir.array<*:f32>>) -> i32
     ```
 
     In the above example, `%53` may box an array of REAL values while `%54`
@@ -1234,14 +1232,14 @@ def fir_ArrayLoadOp : fir_Op<"array_load", [AttrSizedOperandSegments]> {
     One can use `fir.array_load` to produce an ssa-value that captures an
     immutable value of the entire array `a`, as in the Fortran array expression
     shown above. Subsequent changes to the memory containing the array do not
-    alter its composite value. This operation let's one load an array as a
+    alter its composite value. This operation lets one load an array as a
     value while applying a runtime shape, shift, or slice to the memory
     reference, and its semantics guarantee immutability.
 
     ```mlir
-      %s = fir.shape_shift %o, %n, %p, %m : (index, index, index, index) -> !fir.shape<2>
+      %s = fir.shape_shift %o, %n, %p, %m : (index, index, index, index) -> !fir.shapeshift<2>
       // load the entire array 'a'
-      %v = fir.array_load %a(%s) : (!fir.ref<!fir.array<?x?xf32>>, !fir.shape<2>) -> !fir.array<?x?xf32>
+      %v = fir.array_load %a(%s) : (!fir.ref<!fir.array<?x?xf32>>, !fir.shapeshift<2>) -> !fir.array<?x?xf32>
       // a fir.store here into array %a does not change %v
     ```
   }];
@@ -1389,16 +1387,13 @@ def fir_ArrayModifyOp : fir_Op<"array_modify", [AttrSizedOperandSegments,
     ```mlir
       %s = fir.shape %n : (index) -> !fir.shape<1>
       // Load the entire array 'a'.
-      %v = fir.array_load %a(%s) : (!fir.ref<!fir.array<?xf32>>, !fir.shape<1>)
-          -> !fir.array<?xf32>
+      %v = fir.array_load %a(%s) : (!fir.ref<!fir.array<?xf32>>, !fir.shape<1>) -> !fir.array<?xf32>
       // Update the value of one of the array value's elements with a user
       // defined assignment from %rhs.
       %new = fir.do_loop %i = ... (%inner = %v) {
         %rhs = ...
-        %addr, %r = fir.array_modify %inner, %i, %j : (!fir.array<?xf32>,
-	    index) -> fir.ref<f32>, !fir.array<?xf32>
-        fir.call @user_def_assign(%addr, %rhs) (fir.ref<f32>,
-	    fir.ref<!fir.type<SomeType>>) -> ()
+        %addr, %r = fir.array_modify %inner, %i : (!fir.array<?xf32>, index) -> (fir.ref<f32>, !fir.array<?xf32>)
+        fir.call @user_def_assign(%addr, %rhs) (fir.ref<f32>, fir.ref<!fir.type<SomeType>>) -> ()
         fir.result %r : !fir.ref<!fir.array<?xf32>>
       }
       fir.array_merge_store %v, %new to %a : !fir.ref<!fir.array<?xf32>>
@@ -1466,7 +1461,7 @@ def fir_ArrayAccessOp : fir_Op<"array_access", [AttrSizedOperandSegments,
     between.
 
     TODO: The above restriction is not enforced. The design of the operation
-    might need to be revisited to avoid such restructions.
+    might need to be revisited to avoid such restrictions.
 
     More information about `array_access` and other array operations can be
     found in flang/docs/FIRArrayOperations.md.
@@ -1895,7 +1890,7 @@ def fir_InsertValueOp : fir_OneResultOp<"insert_value", [NoSideEffect]> {
 
   let description = [{
     Insert a value into an entity with a type composed of tuples, arrays,
-    and/or derived types. Returns a new ssa value with the same type as the
+    and/or derived types. Returns a new ssa-value with the same type as the
     original entity. Cannot be used on values of `!fir.box` type.
     It can also be used to set complex parts and elements of a character
     string.
@@ -1928,7 +1923,7 @@ def fir_InsertOnRangeOp : fir_OneResultOp<"insert_on_range", [NoSideEffect]> {
   let description = [{
     Insert copies of a value into an entity with an array type of constant shape
     and size.
-    Returns a new ssa value with the same type as the original entity.
+    Returns a new ssa-value with the same type as the original entity.
     The values are inserted at a contiguous range of indices in Fortran
     row-to-column element order as specified by lower and upper bound
     coordinates.
@@ -1958,7 +1953,7 @@ def fir_LenParamIndexOp : fir_OneResultOp<"len_param_index", [NoSideEffect]> {
     "create a field index value from a LEN type parameter identifier";
 
   let description = [{
-    Generate a LEN parameter (offset) value from an LEN parameter identifier.
+    Generate a LEN parameter (offset) value from a LEN parameter identifier.
     The type of a LEN parameter value is `!fir.len` and these values can be
     used with the `fir.coordinate_of` instructions to compute (abstract)
     addresses of LEN parameters.
@@ -2327,37 +2322,44 @@ def fir_DispatchOp : fir_Op<"dispatch", []> {
 
   let description = [{
     Perform a dynamic dispatch on the method name via the dispatch table
-    associated with the first argument.  The attribute 'pass_arg_pos' can be
-    used to select a dispatch argument other than the first one.
+    associated with the first operand.  The attribute `pass_arg_pos` can be
+    used to select a dispatch operand other than the first one.  The absence of
+    `pass_arg_pos` attribute means nopass.
 
     ```mlir
-      %r = fir.dispatch methodA(%o) : (!fir.box<none>) -> i32
+      // fir.dispatch with no attribute.
+      %r = fir.dispatch "methodA"(%o) : (!fir.class<T>) -> i32
+
+      // fir.dispatch with the `pass_arg_pos` attribute.
+      %r = fir.dispatch "methodA"(%o : !fir.class<T>) (%o : !fir.class<T>) -> i32 {pass_arg_pos = 0 : i32}
     ```
   }];
 
   let arguments = (ins
     StrAttr:$method,
-    fir_BoxType:$object,
-    Variadic<AnyType>:$args
+    fir_ClassType:$object,
+    Variadic<AnyType>:$args,
+    OptionalAttr<I32Attr>:$pass_arg_pos
   );
 
-  let results = (outs Variadic<AnyType>);
+  let results = (outs Variadic<AnyType>:$results);
 
-  let hasCustomAssemblyFormat = 1;
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    $method `(` $object `:` qualified(type($object)) `)`
+    ( `(` $args^ `:` type($args) `)` )? (`->` type($results)^)? attr-dict
+  }];
 
   let extraClassDeclaration = [{
     mlir::FunctionType getFunctionType();
     operand_range getArgOperands() {
       return {arg_operand_begin(), arg_operand_end()};
     }
-    // operand[0] is the object (of box type)
+    // operand[0] is the object (of class type)
     operand_iterator arg_operand_begin() { return operand_begin() + 1; }
     operand_iterator arg_operand_end() { return operand_end(); }
-    static constexpr llvm::StringRef getPassArgAttrName() {
-      return "pass_arg_pos";
-    }
     static constexpr llvm::StringRef getMethodAttrNameStr() { return "method"; }
-    unsigned passArgPos();
   }];
 }
 
@@ -2510,7 +2512,7 @@ def fir_AddrOfOp : fir_OneResultOp<"address_of", [NoSideEffect]> {
 
   let description = [{
     Convert a symbol (a function or global reference) to an SSA-value to be
-    used in other Operations. References to Fortran symbols are distinguished
+    used in other operations. References to Fortran symbols are distinguished
     via this operation from other arbitrary constant values.
 
     ```mlir
@@ -2526,12 +2528,13 @@ def fir_AddrOfOp : fir_OneResultOp<"address_of", [NoSideEffect]> {
 }
 
 def fir_ConvertOp : fir_OneResultOp<"convert", [NoSideEffect]> {
-  let summary = "encapsulates all Fortran scalar type conversions";
+  let summary = "encapsulates all Fortran entity type conversions";
 
   let description = [{
-    Generalized type conversion. Convert the ssa value from type T to type U.
+    Generalized type conversion. Convert the ssa-value from type T to type U.
     Not all pairs of types have conversions. When types T and U are the same
-    type, this instruction is a NOP and may be folded away.
+    type, this instruction is a NOP and may be folded away. This also supports
+    integer to pointer conversion and pointer to integer conversion.
 
     ```mlir
       %v = ... : i64
@@ -2647,6 +2650,7 @@ def fir_GlobalOp : fir_Op<"global", [IsolatedFromAbove, Symbol]> {
     TypeAttr:$type,
     OptionalAttr<AnyAttr>:$initVal,
     OptionalAttr<UnitAttr>:$constant,
+    OptionalAttr<UnitAttr>:$target,
     OptionalAttr<StrAttr>:$linkName
   );
 
@@ -2659,19 +2663,20 @@ def fir_GlobalOp : fir_Op<"global", [IsolatedFromAbove, Symbol]> {
     OpBuilder<(ins "llvm::StringRef":$name, "mlir::Type":$type,
       CArg<"llvm::ArrayRef<mlir::NamedAttribute>", "{}">:$attrs)>,
     OpBuilder<(ins "llvm::StringRef":$name, "bool":$isConstant,
-      "mlir::Type":$type,
+      "bool":$isTarget, "mlir::Type":$type,
       CArg<"llvm::ArrayRef<mlir::NamedAttribute>", "{}">:$attrs)>,
     OpBuilder<(ins "llvm::StringRef":$name, "mlir::Type":$type,
       CArg<"mlir::StringAttr", "{}">:$linkage,
       CArg<"llvm::ArrayRef<mlir::NamedAttribute>", "{}">:$attrs)>,
     OpBuilder<(ins "llvm::StringRef":$name, "bool":$isConstant,
+      "bool":$isTarget,
       "mlir::Type":$type, CArg<"mlir::StringAttr", "{}">:$linkage,
       CArg<"llvm::ArrayRef<mlir::NamedAttribute>", "{}">:$attrs)>,
     OpBuilder<(ins "llvm::StringRef":$name, "mlir::Type":$type,
       "mlir::Attribute":$initVal, CArg<"mlir::StringAttr", "{}">:$linkage,
       CArg<"llvm::ArrayRef<mlir::NamedAttribute>", "{}">:$attrs)>,
     OpBuilder<(ins "llvm::StringRef":$name, "bool":$isConstant,
-      "mlir::Type":$type, "mlir::Attribute":$initVal,
+      "bool":$isTarget, "mlir::Type":$type, "mlir::Attribute":$initVal,
       CArg<"mlir::StringAttr", "{}">:$linkage,
       CArg<"llvm::ArrayRef<mlir::NamedAttribute>", "{}">:$attrs)>,
   ];
@@ -2683,6 +2688,9 @@ def fir_GlobalOp : fir_Op<"global", [IsolatedFromAbove, Symbol]> {
     }
     static constexpr llvm::StringRef getLinkageAttrNameStr() {
       return "linkName";
+    }
+    static constexpr llvm::StringRef getTargetAttrNameStr() {
+      return "target";
     }
 
     /// The semantic type of the global

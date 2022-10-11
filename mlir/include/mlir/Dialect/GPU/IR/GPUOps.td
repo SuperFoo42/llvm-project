@@ -263,8 +263,9 @@ def GPU_GPUFuncOp : GPU_Op<"func", [
 
     /// Returns the number of buffers located in the workgroup memory.
     unsigned getNumWorkgroupAttributions() {
-      return (*this)->getAttrOfType<IntegerAttr>(
-          getNumWorkgroupAttributionsAttrName()).getInt();
+      auto attr = (*this)->getAttrOfType<IntegerAttr>(
+          getNumWorkgroupAttributionsAttrName());
+      return attr ? attr.getInt() : 0;
     }
 
     /// Returns a list of block arguments that correspond to buffers located in
@@ -716,6 +717,30 @@ def GPU_AllReduceOp : GPU_Op<"all_reduce",
   let hasRegionVerifier = 1;
 }
 
+def GPU_SubgroupReduceOp : GPU_Op<"subgroup_reduce",
+    [SameOperandsAndResultType]>,
+    Arguments<(ins AnyType:$value,
+               GPU_AllReduceOperationAttr:$op)>,
+    Results<(outs AnyType)> {
+  let summary = "Reduce values among subgroup.";
+  let description = [{
+    The `subgroup_reduce` op reduces the value of every work item across a
+    subgroup. The result is equal for all work items of a subgroup.
+
+    Example:
+
+    ```mlir
+    %1 = gpu.subgroup_reduce add %0 : (f32) -> (f32)
+    ```
+
+    Either none or all work items of a subgroup need to execute this op
+    in convergence.
+  }];
+  let assemblyFormat = [{ custom<AllReduceOperation>($op) $value attr-dict
+                          `:` functional-type(operands, results) }];
+  let hasVerifier = 1;
+}
+
 def GPU_ShuffleOpXor  : I32EnumAttrCase<"XOR",  0, "xor">;
 def GPU_ShuffleOpDown : I32EnumAttrCase<"DOWN", 1, "down">;
 def GPU_ShuffleOpUp   : I32EnumAttrCase<"UP",   2, "up">;
@@ -918,24 +943,28 @@ def GPU_AllocOp : GPU_Op<"alloc", [
     it does not block until the execution has finished on the device). In
     that case, it also returns a !gpu.async.token.
 
+    If the `host_shared` keyword is present, the memory will be allocated in a
+    memory accessible both on host and on device.
+
     Example:
 
     ```mlir
-    %memref, %token = gpu.alloc async [%dep] (%width) : memref<64x?xf32, 1>
+    %memref, %token = gpu.alloc async [%dep] host_shared (%width) : memref<64x?xf32, 1>
     ```
   }];
 
   let arguments = (ins Variadic<GPU_AsyncToken>:$asyncDependencies,
-                   Variadic<Index>:$dynamicSizes, Variadic<Index>:$symbolOperands);
+                   Variadic<Index>:$dynamicSizes, Variadic<Index>:$symbolOperands,
+                   UnitAttr:$hostShared);
   let results = (outs Res<AnyMemRef, "", [MemAlloc]>:$memref,
                  Optional<GPU_AsyncToken>:$asyncToken);
 
   let extraClassDeclaration = [{
-    MemRefType getType() { return memref().getType().cast<MemRefType>(); }
+    MemRefType getType() { return getMemref().getType().cast<MemRefType>(); }
   }];
 
   let assemblyFormat = [{
-    custom<AsyncDependencies>(type($asyncToken), $asyncDependencies) ` `
+    custom<AsyncDependencies>(type($asyncToken), $asyncDependencies) (` ` `host_shared` $hostShared^)? ` `
     `(` $dynamicSizes `)` (`` `[` $symbolOperands^ `]`)? attr-dict `:` type($memref)
   }];
 
@@ -1208,7 +1237,7 @@ def GPU_SubgroupMmaConstantMatrixOp : GPU_Op<"subgroup_mma_constant_matrix",
 
   let extraClassDeclaration = [{
     gpu::MMAMatrixType getType() {
-      return res().getType().cast<gpu::MMAMatrixType>();
+      return getRes().getType().cast<gpu::MMAMatrixType>();
     }
   }];
 
@@ -1269,7 +1298,7 @@ def GPU_SubgroupMmaElementwiseOp : GPU_Op<"subgroup_mma_elementwise",
 
   let extraClassDeclaration = [{
     gpu::MMAMatrixType getType() {
-      return res().getType().cast<gpu::MMAMatrixType>();
+      return getRes().getType().cast<gpu::MMAMatrixType>();
     }
   }];
 

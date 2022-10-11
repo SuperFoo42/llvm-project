@@ -132,9 +132,11 @@ struct Configuration {
   bool emitDataInCodeInfo = false;
   bool emitEncryptionInfo = false;
   bool emitInitOffsets = false;
+  bool emitChainedFixups = false;
   bool timeTraceEnabled = false;
   bool dataConst = false;
   bool dedupLiterals = true;
+  bool deadStripDuplicates = false;
   bool omitDebugInfo = false;
   bool warnDylibInstallName = false;
   bool ignoreOptimizationHints = false;
@@ -166,6 +168,7 @@ struct Configuration {
   bool demangle = false;
   bool deadStrip = false;
   bool errorForArchMismatch = false;
+  bool ignoreAutoLink = false;
   PlatformInfo platformInfo;
   llvm::Optional<PlatformInfo> secondaryPlatformInfo;
   NamespaceKind namespaceKind = NamespaceKind::twolevel;
@@ -202,7 +205,7 @@ struct Configuration {
   SymtabPresence localSymbolsPresence = SymtabPresence::All;
   SymbolPatterns localSymbolPatterns;
 
-  bool zeroModTime = false;
+  bool zeroModTime = true;
 
   llvm::StringRef osoPrefix;
 
