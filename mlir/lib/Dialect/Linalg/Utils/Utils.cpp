@@ -524,7 +524,7 @@ void GenerateLoopNest<scf::ForOp>::doit(
 /// Specialization to build affine "for" nest.
 template <>
 void GenerateLoopNest<AffineForOp>::doit(OpBuilder &b, Location loc, ArrayRef<Range> loopRanges,
-                                         LinalgOp linalgOp, ArrayRef<StringRef> iteratorTypes,
+                                         LinalgOp linalgOp, ArrayRef<Attribute> iteratorTypes,
                                          function_ref<scf::ValueVector(OpBuilder &, Location,
                                                                        ValueRange, llvm::SmallDenseMap<OpOperand *, Value>)>
                                          bodyBuilderFn,
@@ -552,7 +552,7 @@ void GenerateLoopNest<AffineForOp>::doit(OpBuilder &b, Location loc, ArrayRef<Ra
     OpOperand *op;
     std::tie(op, iter_arg) = val.value();
     // TODO: check only read uses in loop, except last statement store?
-    if (isReductionIterator(iter_arg) &&
+    if (isReductionIterator(iter_arg.dyn_cast<StringAttr>()) &&
         op->get().getType().dyn_cast<MemRefType>().getNumElements() == 1) {
       memrefValueMapping.insert(
           std::make_pair(op, b.create<memref::LoadOp>(loc, op->get())));

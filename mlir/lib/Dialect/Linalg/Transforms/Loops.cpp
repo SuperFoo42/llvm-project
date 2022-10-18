@@ -234,7 +234,7 @@ emitScalarImplementation(OpBuilder &b, Location loc, ArrayRef<Value> allIvs,
       continue;
     }
     auto indexing = makeCanonicalAffineApplies(
-        b, loc, linalgOp.getTiedIndexingMap(inputOperand), allIvsPlusDims);
+        b, loc, linalgOp.getMatchingIndexingMap(inputOperand), allIvsPlusDims);
     //if ((llvm::all_of(indexing, isForInductionVar))) {
       indexedValues.push_back(
           b.create<AffineLoadOp>(loc, inputOperand->get(), indexing));
@@ -246,7 +246,7 @@ emitScalarImplementation(OpBuilder &b, Location loc, ArrayRef<Value> allIvs,
   // 1.b. Emit load from output views.
   for (auto &op : linalgOp.getOutputOperands()) {
     SmallVector<Value> indexing = makeCanonicalAffineApplies(
-        b, loc, linalgOp.getTiedIndexingMap(op), allIvsPlusDims);
+        b, loc, linalgOp.getMatchingIndexingMap(op), allIvsPlusDims);
     auto val = opIvsMapping.lookup(op);
     if (val == Value()) {
 /*      if (llvm::all_of(indexing, isForInductionVar))*/
@@ -267,7 +267,7 @@ emitScalarImplementation(OpBuilder &b, Location loc, ArrayRef<Value> allIvs,
   SmallVector<Value> outputBuffers;
   for (OpOperand *outputOperand : linalgOp.getOutputBufferOperands()) {
     indexing.push_back(makeCanonicalAffineApplies(
-        b, loc, linalgOp.getTiedIndexingMap(outputOperand), allIvsPlusDims));
+        b, loc, linalgOp.getMatchingIndexingMap(outputOperand), allIvsPlusDims));
     outputBuffers.push_back(outputOperand->get());
   }
   inlineRegionAndEmitStore(b, loc, linalgOp, indexedValues, indexing,
