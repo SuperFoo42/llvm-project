@@ -31,7 +31,10 @@ def LinalgFoldUnitExtentDims : Pass<"linalg-fold-unit-extent-dims", ""> {
     Option<"foldOneTripLoopsOnly", "fold-one-trip-loops-only", "bool",
             /*default=*/"false",
            "Only folds the one-trip loops from Linalg ops on tensors "
-           "(for testing purposes only)">
+           "(for testing purposes only)">,
+    Option<"useRankReducingSlices", "use-rank-reducing-slices", "bool",
+           /*default=*/"false",
+           "Generate rank-reducing slices instead of reassociative reshapes">
   ];
   let dependentDialects = [
     "linalg::LinalgDialect", "AffineDialect", "memref::MemRefDialect"
@@ -143,17 +146,6 @@ def LinalgDetensorize : Pass<"linalg-detensorize", ""> {
            "Detensorize all ops that qualify for detensoring along with branch"
            " operands and basic-block arguments.">
 
-  ];
-}
-
-def LinalgStrategyRemoveMarkersPass
-    : Pass<"linalg-strategy-remove-markers-pass", "func::FuncOp"> {
-  let summary = "Cleanup pass that drops markers.";
-  let constructor = "mlir::createLinalgStrategyRemoveMarkersPass()";
-  let dependentDialects = ["linalg::LinalgDialect"];
-  let options = [
-    Option<"anchorFuncName", "anchor-func", "std::string", /*default=*/"",
-      "Which func op is the anchor to latch on.">,
   ];
 }
 

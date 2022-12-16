@@ -210,20 +210,24 @@ bool Expr::isFlexibleArrayMemberLike(
 
   // For compatibility with existing code, we treat arrays of length 0 or
   // 1 as flexible array members.
-  if (const auto *CAT = Context.getAsConstantArrayType(getType())) {
+  const auto *CAT = Context.getAsConstantArrayType(getType());
+  if (CAT) {
     llvm::APInt Size = CAT->getSize();
+
+    using FAMKind = LangOptions::StrictFlexArraysLevelKind;
+
+    if (StrictFlexArraysLevel == FAMKind::IncompleteOnly)
+      return false;
 
     // GCC extension, only allowed to represent a FAM.
     if (Size == 0)
       return true;
 
-    // FIXME: While the default -fstrict-flex-arrays=0 permits Size>1 trailing
-    // arrays to be treated as flexible-array-members, we still emit diagnostics
-    // as if they are not. Pending further discussion...
-    using FAMKind = LangOptions::StrictFlexArraysLevelKind;
-    if (StrictFlexArraysLevel == FAMKind::ZeroOrIncomplete || Size.uge(2))
+    if (StrictFlexArraysLevel == FAMKind::ZeroOrIncomplete && Size.uge(1))
       return false;
 
+    if (StrictFlexArraysLevel == FAMKind::OneZeroOrIncomplete && Size.uge(2))
+      return false;
   } else if (!Context.getAsIncompleteArrayType(getType()))
     return false;
 
@@ -244,8 +248,13 @@ bool Expr::isFlexibleArrayMemberLike(
   // FIXME: If the base type of the member expr is not FD->getParent(),
   // this should not be treated as a flexible array member access.
   if (const auto *FD = dyn_cast<FieldDecl>(ND)) {
-    if (FD->getParent()->isUnion())
-      return true;
+    // GCC treats an array memeber of a union as an FAM if the size is one or
+    // zero.
+    if (CAT) {
+      llvm::APInt Size = CAT->getSize();
+      if (FD->getParent()->isUnion() && (Size.isZero() || Size.isOne()))
+        return true;
+    }
 
     // Don't consider sizes resulting from macro expansions or template argument
     // substitution to form C89 tail-padded arrays.
@@ -638,7 +647,7 @@ std::string SYCLUniqueStableNameExpr::ComputeName(ASTContext &Context,
                            const NamedDecl *ND) -> llvm::Optional<unsigned> {
     if (const auto *RD = dyn_cast<CXXRecordDecl>(ND))
       return RD->getDeviceLambdaManglingNumber();
-    return llvm::None;
+    return std::nullopt;
   };
 
   std::unique_ptr<MangleContext> Ctx{ItaniumMangleContext::create(
@@ -3635,6 +3644,7 @@ bool Expr::HasSideEffects(const ASTContext &Ctx,
   case ShuffleVectorExprClass:
   case ConvertVectorExprClass:
   case AsTypeExprClass:
+  case CXXParenListInitExprClass:
     // These have a side-effect if any subexpression does.
     break;
 
@@ -3930,7 +3940,7 @@ Expr::isNullPointerConstant(ASTContext &Ctx,
   if (getType().isNull())
     return NPCK_NotNull;
 
-  // C++11 nullptr_t is always a null pointer constant.
+  // C++11/C2x nullptr_t is always a null pointer constant.
   if (getType()->isNullPtrType())
     return NPCK_CXX11_nullptr;
 
@@ -4524,7 +4534,8 @@ DesignatedInitUpdateExpr::DesignatedInitUpdateExpr(const ASTContext &C,
            OK_Ordinary) {
   BaseAndUpdaterExprs[0] = baseExpr;
 
-  InitListExpr *ILE = new (C) InitListExpr(C, lBraceLoc, None, rBraceLoc);
+  InitListExpr *ILE =
+      new (C) InitListExpr(C, lBraceLoc, std::nullopt, rBraceLoc);
   ILE->setType(baseExpr->getType());
   BaseAndUpdaterExprs[1] = ILE;
 

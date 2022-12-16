@@ -79,18 +79,15 @@ struct TestLinalgTransforms
       *this, "test-generalize-pad-tensor",
       llvm::cl::desc("Test transform pad tensor by copying with generic ops"),
       llvm::cl::init(false)};
+  Option<bool> testGeneralizeTensorPackOp{
+      *this, "test-generalize-tensor-pack",
+      llvm::cl::desc("Test transform that generalize pack ops into a sequence "
+                     "of tensor and Linalg ops"),
+      llvm::cl::init(false)};
   Option<bool> testSwapSubTensorPadTensor{
       *this, "test-swap-subtensor-padtensor",
       llvm::cl::desc("Test rewrite of subtensor(tensor.pad) into "
                      "tensor.pad(subtensor)"),
-      llvm::cl::init(false)};
-  Option<bool> testSplitReduction{
-      *this, "test-split-reduction",
-      llvm::cl::desc("Test split reduction transformation"),
-      llvm::cl::init(false)};
-  Option<bool> testSplitReductionInnerParallel{
-      *this, "test-split-reduction-inner-parallel",
-      llvm::cl::desc("Test split reduction with inner parallel transformation"),
       llvm::cl::init(false)};
   ListOption<int64_t> peeledLoops{
       *this, "peeled-loops",
@@ -117,19 +114,20 @@ struct TestLinalgTransforms
       llvm::cl::desc(
           "Test patterns to swap tensor.extract_slice(linalg.fill())"),
       llvm::cl::init(false)};
+  Option<bool> testEraseUnusedOperandsAndResults{
+      *this, "test-erase-unused-operands-and-results",
+      llvm::cl::desc("Test patterns to erase unused operands and results"),
+      llvm::cl::init(false)};
+  Option<bool> testEraseUnnecessaryInputs{
+      *this, "test-erase-unnecessary-inputs",
+      llvm::cl::desc("Test patterns to erase unnecessary inputs"),
+      llvm::cl::init(false)};
 };
 } // namespace
 
 static void applyPatterns(func::FuncOp funcOp) {
   MLIRContext *ctx = funcOp.getContext();
   RewritePatternSet patterns(ctx);
-
-  //===--------------------------------------------------------------------===//
-  // Linalg to loops patterns.
-  //===--------------------------------------------------------------------===//
-  patterns.add<LinalgLoweringPattern<DotOp>>(
-      ctx,
-      /*loweringType=*/LinalgLoweringType::Loops);
 
   //===--------------------------------------------------------------------===//
   // Linalg distribution patterns.
@@ -142,11 +140,6 @@ static void applyPatterns(func::FuncOp funcOp) {
   patterns.add<CopyVectorizationPattern>(ctx);
 
   (void)applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
-
-  // Drop the marker.
-  funcOp.walk([](LinalgOp op) {
-    op->removeAttr(LinalgTransforms::kLinalgTransformMarker);
-  });
 }
 
 static void applyVectorTransferForwardingPatterns(func::FuncOp funcOp) {
@@ -177,37 +170,15 @@ static void applyGeneralizePadTensorPatterns(func::FuncOp funcOp) {
   (void)applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
 }
 
+static void applyGeneralizeTensorPackPatterns(func::FuncOp funcOp) {
+  RewritePatternSet patterns(funcOp.getContext());
+  patterns.add<GeneralizeOuterUnitDimsPackOpPattern>(funcOp.getContext());
+  (void)applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
+}
+
 static void applyExtractSliceOfPadTensorSwapPattern(func::FuncOp funcOp) {
   RewritePatternSet patterns(funcOp.getContext());
   patterns.add<ExtractSliceOfPadTensorSwapPattern>(funcOp.getContext());
-  (void)applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
-}
-
-static void applySplitReduction(func::FuncOp funcOp) {
-  RewritePatternSet patterns(funcOp.getContext());
-  linalg::populateSplitReductionPattern(
-      patterns,
-      [](LinalgOp op) {
-        unsigned insertDimIndex = op.getNumLoops() - 1;
-        return SplitReductionOptions{4, insertDimIndex, false};
-      },
-      LinalgTransformationFilter(
-          ArrayRef<StringAttr>{},
-          StringAttr::get(funcOp.getContext(), "SPLIT")));
-  (void)applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
-}
-
-static void applySplitReductionInnerParallel(func::FuncOp funcOp) {
-  RewritePatternSet patterns(funcOp.getContext());
-  linalg::populateSplitReductionPattern(
-      patterns,
-      [](LinalgOp op) {
-        unsigned insertDimIndex = op.getNumLoops() - 1;
-        return SplitReductionOptions{4, insertDimIndex, true};
-      },
-      LinalgTransformationFilter(
-          ArrayRef<StringAttr>{},
-          StringAttr::get(funcOp.getContext(), "SPLIT")));
   (void)applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
 }
 
@@ -223,15 +194,20 @@ static void applySwapExtractSliceWithFillPattern(func::FuncOp funcOp) {
   (void)applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
 }
 
+static void applyEraseUnusedOperandsAndResultsPatterns(func::FuncOp funcOp) {
+  RewritePatternSet patterns(funcOp.getContext());
+  populateEraseUnusedOperandsAndResultsPatterns(patterns);
+  (void)applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
+}
+
+static void applyEraseUnnecessaryInputs(func::FuncOp funcOp) {
+  RewritePatternSet patterns(funcOp.getContext());
+  populateEraseUnnecessaryInputsPatterns(patterns);
+  (void)applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
+}
+
 /// Apply transformations specified as patterns.
 void TestLinalgTransforms::runOnOperation() {
-  auto lambda = [&](void *) {
-    getOperation().walk([](LinalgOp op) {
-      op->removeAttr(LinalgTransforms::kLinalgTransformMarker);
-    });
-  };
-  std::unique_ptr<void, decltype(lambda)> cleanupGuard{(void *)1, lambda};
-
   if (testPatterns)
     return applyPatterns(getOperation());
   if (testVectorTransferForwardingPatterns)
@@ -242,16 +218,18 @@ void TestLinalgTransforms::runOnOperation() {
     return applyPadTensorToGenericPatterns(getOperation());
   if (testGeneralizePadTensor)
     return applyGeneralizePadTensorPatterns(getOperation());
+  if (testGeneralizeTensorPackOp)
+    return applyGeneralizeTensorPackPatterns(getOperation());
   if (testSwapSubTensorPadTensor)
     return applyExtractSliceOfPadTensorSwapPattern(getOperation());
-  if (testSplitReduction)
-    return applySplitReduction(getOperation());
-  if (testSplitReductionInnerParallel)
-    return applySplitReductionInnerParallel(getOperation());
   if (testBubbleUpExtractSliceOpPattern)
     return applyBubbleUpExtractSliceOpPattern(getOperation());
   if (testSwapExtractSliceWithFill)
     return applySwapExtractSliceWithFillPattern(getOperation());
+  if (testEraseUnusedOperandsAndResults)
+    return applyEraseUnusedOperandsAndResultsPatterns(getOperation());
+  if (testEraseUnnecessaryInputs)
+    return applyEraseUnnecessaryInputs(getOperation());
 }
 
 namespace mlir {

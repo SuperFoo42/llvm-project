@@ -674,8 +674,8 @@ defm V_CMPX_GT_I16 : VOPCX_I16 <"v_cmpx_gt_i16">;
 defm V_CMPX_NE_I16 : VOPCX_I16 <"v_cmpx_ne_i16">;
 defm V_CMPX_GE_I16 : VOPCX_I16 <"v_cmpx_ge_i16">;
 defm V_CMPX_T_I16 : VOPCX_I16 <"v_cmpx_t_i16">;
-defm V_CMPX_F_U16 : VOPCX_I16 <"v_cmpx_f_u16">;
 
+defm V_CMPX_F_U16 : VOPCX_I16 <"v_cmpx_f_u16">;
 defm V_CMPX_LT_U16 : VOPCX_I16 <"v_cmpx_lt_u16", "v_cmpx_gt_u16">;
 defm V_CMPX_EQ_U16 : VOPCX_I16 <"v_cmpx_eq_u16">;
 defm V_CMPX_LE_U16 : VOPCX_I16 <"v_cmpx_le_u16", "v_cmpx_ge_u16">;
@@ -1404,14 +1404,14 @@ let AssemblerPredicate = isGFX11Only in {
         VOPCe<op{7-0}>,
         MnemonicAlias<!if(!empty(pseudo_mnemonic), ps32.Mnemonic,
                           pseudo_mnemonic),
-                      asm_name>,
+                      asm_name, ps32.AsmVariantName>,
         Requires<[isGFX11Plus]>;
       def _e64_gfx11 :
             VOP3_Real<ps64, SIEncodingFamily.GFX11, asm_name>,
             VOP3a_gfx11<{0, op}, ps64.Pfl>,
             MnemonicAlias<!if(!empty(pseudo_mnemonic), ps64.Mnemonic,
                               pseudo_mnemonic),
-                          asm_name>,
+                          asm_name, ps64.AsmVariantName>,
             Requires<[isGFX11Plus]> {
         // Encoding used for VOPC instructions encoded as VOP3 differs from
         // VOP3e by destination name (sdst) as VOPC doesn't have vector dst.
@@ -1568,7 +1568,7 @@ let AssemblerPredicate = isGFX11Only in {
           : VOPC_Real<ps32, SIEncodingFamily.GFX11, asm_name>,
             MnemonicAlias<!if(!empty(pseudo_mnemonic), !subst("_nosdst", "", ps32.Mnemonic),
                               pseudo_mnemonic),
-                          asm_name>,
+                          asm_name, ps32.AsmVariantName>,
             Requires<[isGFX11Plus]>,
             VOPCe<op{7-0}> {
         let AsmString = asm_name # "{_e32} " # ps32.AsmOperands;
@@ -1577,7 +1577,7 @@ let AssemblerPredicate = isGFX11Only in {
           : VOP3_Real<ps64, SIEncodingFamily.GFX11, asm_name>,
             MnemonicAlias<!if(!empty(pseudo_mnemonic), !subst("_nosdst", "", ps64.Mnemonic),
                               pseudo_mnemonic),
-                          asm_name>,
+                          asm_name, ps64.AsmVariantName>,
             Requires<[isGFX11Plus]>,
             VOP3a_gfx11<{0, op}, ps64.Pfl> {
         let Inst{7-0} = ? ; // sdst

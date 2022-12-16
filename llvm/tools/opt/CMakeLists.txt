@@ -14,6 +14,7 @@ set(LLVM_LINK_COMPONENTS
   Extensions
   IPO
   IRReader
+  IRPrinter
   InstCombine
   Instrumentation
   MC
@@ -31,7 +32,6 @@ add_llvm_tool(opt
   AnalysisWrappers.cpp
   BreakpointPrinter.cpp
   NewPMDriver.cpp
-  PrintSCC.cpp
   opt.cpp
 
   DEPENDS

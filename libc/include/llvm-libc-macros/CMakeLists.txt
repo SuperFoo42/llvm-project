@@ -31,9 +31,21 @@ add_header(
 )
 
 add_header(
+  stdio_macros
+  HDR
+    stdio-macros.h
+)
+
+add_header(
   stdlib_macros
   HDR
     stdlib-macros.h
+)
+
+add_header(
+  sys_auxv_macros
+  HDR
+    sys-auxv-macros.h
 )
 
 add_header(
@@ -78,11 +90,33 @@ add_header(
 )
 
 add_header(
+  sys_select_macros
+  HDR
+    sys-select-macros.h
+)
+
+add_header(
+  sys_time_macros
+  HDR
+    sys-time-macros.h
+  DEPENDS
+    .linux.sys_time_macros
+)
+
+add_header(
   sys_wait_macros
   HDR
     sys-wait-macros.h
   DEPENDS
     .linux.sys_wait_macros
+)
+
+add_header(
+  termios_macros
+  HDR
+    termios-macros.h
+  DEPENDS
+    .linux.termios_macros
 )
 
 add_header(

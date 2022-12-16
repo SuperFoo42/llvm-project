@@ -137,6 +137,11 @@ def GnuExtensions : StandardSpec<"GNUExtensions"> {
                ArgSpec<SizeTType>,
                ArgSpec<FILERestrictedPtr>]
           >,
+          FunctionSpec<
+              "fgetc_unlocked",
+              RetValSpec<IntType>,
+              [ArgSpec<FILEPtr>]
+          >,
       ]
   >;
 
@@ -157,6 +162,14 @@ def GnuExtensions : StandardSpec<"GNUExtensions"> {
               [ArgSpec<PThreadTType>, ArgSpec<CharPtr>, ArgSpec<SizeTType>]
           >,
       ]
+  >;
+
+  HeaderSpec SysAuxv = HeaderSpec<
+      "sys/auxv.h",
+      [], // Macros
+      [], // Types
+      [], // Enumerations
+      []  // Functions
   >;
 
   HeaderSpec SendFile = HeaderSpec<
@@ -194,6 +207,7 @@ def GnuExtensions : StandardSpec<"GNUExtensions"> {
     PThread,
     Sched,
     SendFile,
+    SysAuxv,
     StdIO,
     String,
     UniStd,

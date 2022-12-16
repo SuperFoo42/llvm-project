@@ -843,6 +843,11 @@ void StmtPrinter::VisitOMPTaskwaitDirective(OMPTaskwaitDirective *Node) {
   PrintOMPExecutableDirective(Node);
 }
 
+void StmtPrinter::VisitOMPErrorDirective(OMPErrorDirective *Node) {
+  Indent() << "#pragma omp error";
+  PrintOMPExecutableDirective(Node);
+}
+
 void StmtPrinter::VisitOMPTaskgroupDirective(OMPTaskgroupDirective *Node) {
   Indent() << "#pragma omp taskgroup";
   PrintOMPExecutableDirective(Node);
@@ -1293,6 +1298,9 @@ void StmtPrinter::VisitIntegerLiteral(IntegerLiteral *Node) {
     break; // no suffix.
   case BuiltinType::UInt128:
     break; // no suffix.
+  case BuiltinType::WChar_S:
+  case BuiltinType::WChar_U:
+    break; // no suffix
   }
 }
 
@@ -2454,6 +2462,13 @@ void StmtPrinter::VisitCXXFoldExpr(CXXFoldExpr *E) {
     OS << " " << BinaryOperator::getOpcodeStr(E->getOperator()) << " ";
     PrintExpr(E->getRHS());
   }
+  OS << ")";
+}
+
+void StmtPrinter::VisitCXXParenListInitExpr(CXXParenListInitExpr *Node) {
+  OS << "(";
+  llvm::interleaveComma(Node->getInitExprs(), OS,
+                        [&](Expr *E) { PrintExpr(E); });
   OS << ")";
 }
 

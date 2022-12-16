@@ -90,16 +90,10 @@ static bool isLoopDead(Loop *L, ScalarEvolution &SE,
         break;
 
       if (Instruction *I = dyn_cast<Instruction>(incoming)) {
-        bool InstrMoved = false;
-        if (!L->makeLoopInvariant(I, InstrMoved, Preheader->getTerminator())) {
+        if (!L->makeLoopInvariant(I, Changed, Preheader->getTerminator(),
+                                  /*MSSAU=*/nullptr, &SE)) {
           AllEntriesInvariant = false;
           break;
-        }
-        Changed |= InstrMoved;
-        if (InstrMoved) {
-          // Moving I to a different location may change its block disposition,
-          // so invalidate its SCEV.
-          SE.forgetBlockAndLoopDispositions(I);
         }
       }
     }
@@ -461,7 +455,7 @@ static LoopDeletionResult deleteLoopIfDead(Loop *L, DominatorTree &DT,
   BasicBlock *ExitBlock = L->getUniqueExitBlock();
 
   if (ExitBlock && isLoopNeverExecuted(L)) {
-    LLVM_DEBUG(dbgs() << "Loop is proven to never execute, delete it!");
+    LLVM_DEBUG(dbgs() << "Loop is proven to never execute, delete it!\n");
     // We need to forget the loop before setting the incoming values of the exit
     // phis to poison, so we properly invalidate the SCEV expressions for those
     // phis.
@@ -502,7 +496,7 @@ static LoopDeletionResult deleteLoopIfDead(Loop *L, DominatorTree &DT,
                    : LoopDeletionResult::Unmodified;
   }
 
-  LLVM_DEBUG(dbgs() << "Loop is invariant, delete it!");
+  LLVM_DEBUG(dbgs() << "Loop is invariant, delete it!\n");
   ORE.emit([&]() {
     return OptimizationRemark(DEBUG_TYPE, "Invariant", L->getStartLoc(),
                               L->getHeader())

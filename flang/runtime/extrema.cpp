@@ -214,11 +214,13 @@ void RTNAME(MaxlocInteger8)(Descriptor &result, const Descriptor &x, int kind,
   TotalNumericMaxOrMinLoc<TypeCategory::Integer, 8, true>(
       "MAXLOC", result, x, kind, source, line, mask, back);
 }
+#ifdef __SIZEOF_INT128__
 void RTNAME(MaxlocInteger16)(Descriptor &result, const Descriptor &x, int kind,
     const char *source, int line, const Descriptor *mask, bool back) {
   TotalNumericMaxOrMinLoc<TypeCategory::Integer, 16, true>(
       "MAXLOC", result, x, kind, source, line, mask, back);
 }
+#endif
 void RTNAME(MaxlocReal4)(Descriptor &result, const Descriptor &x, int kind,
     const char *source, int line, const Descriptor *mask, bool back) {
   TotalNumericMaxOrMinLoc<TypeCategory::Real, 4, true>(
@@ -268,11 +270,13 @@ void RTNAME(MinlocInteger8)(Descriptor &result, const Descriptor &x, int kind,
   TotalNumericMaxOrMinLoc<TypeCategory::Integer, 8, false>(
       "MINLOC", result, x, kind, source, line, mask, back);
 }
+#ifdef __SIZEOF_INT128__
 void RTNAME(MinlocInteger16)(Descriptor &result, const Descriptor &x, int kind,
     const char *source, int line, const Descriptor *mask, bool back) {
   TotalNumericMaxOrMinLoc<TypeCategory::Integer, 16, false>(
       "MINLOC", result, x, kind, source, line, mask, back);
 }
+#endif
 void RTNAME(MinlocReal4)(Descriptor &result, const Descriptor &x, int kind,
     const char *source, int line, const Descriptor *mask, bool back) {
   TotalNumericMaxOrMinLoc<TypeCategory::Real, 4, false>(
@@ -829,39 +833,39 @@ template <int KIND> struct Norm2Helper {
 
 extern "C" {
 // TODO: REAL(2 & 3)
-CppTypeFor<TypeCategory::Real, 4> RTNAME(Norm2_4)(const Descriptor &x,
-    const char *source, int line, int dim, const Descriptor *mask) {
+CppTypeFor<TypeCategory::Real, 4> RTNAME(Norm2_4)(
+    const Descriptor &x, const char *source, int line, int dim) {
   return GetTotalReduction<TypeCategory::Real, 4>(
-      x, source, line, dim, mask, Norm2Accumulator<4>{x}, "NORM2");
+      x, source, line, dim, nullptr, Norm2Accumulator<4>{x}, "NORM2");
 }
-CppTypeFor<TypeCategory::Real, 8> RTNAME(Norm2_8)(const Descriptor &x,
-    const char *source, int line, int dim, const Descriptor *mask) {
+CppTypeFor<TypeCategory::Real, 8> RTNAME(Norm2_8)(
+    const Descriptor &x, const char *source, int line, int dim) {
   return GetTotalReduction<TypeCategory::Real, 8>(
-      x, source, line, dim, mask, Norm2Accumulator<8>{x}, "NORM2");
+      x, source, line, dim, nullptr, Norm2Accumulator<8>{x}, "NORM2");
 }
 #if LDBL_MANT_DIG == 64
-CppTypeFor<TypeCategory::Real, 10> RTNAME(Norm2_10)(const Descriptor &x,
-    const char *source, int line, int dim, const Descriptor *mask) {
+CppTypeFor<TypeCategory::Real, 10> RTNAME(Norm2_10)(
+    const Descriptor &x, const char *source, int line, int dim) {
   return GetTotalReduction<TypeCategory::Real, 10>(
-      x, source, line, dim, mask, Norm2Accumulator<10>{x}, "NORM2");
+      x, source, line, dim, nullptr, Norm2Accumulator<10>{x}, "NORM2");
 }
 #endif
 #if LDBL_MANT_DIG == 113
-CppTypeFor<TypeCategory::Real, 16> RTNAME(Norm2_16)(const Descriptor &x,
-    const char *source, int line, int dim, const Descriptor *mask) {
+CppTypeFor<TypeCategory::Real, 16> RTNAME(Norm2_16)(
+    const Descriptor &x, const char *source, int line, int dim) {
   return GetTotalReduction<TypeCategory::Real, 16>(
-      x, source, line, dim, mask, Norm2Accumulator<16>{x}, "NORM2");
+      x, source, line, dim, nullptr, Norm2Accumulator<16>{x}, "NORM2");
 }
 #endif
 
 void RTNAME(Norm2Dim)(Descriptor &result, const Descriptor &x, int dim,
-    const char *source, int line, const Descriptor *mask) {
+    const char *source, int line) {
   Terminator terminator{source, line};
   auto type{x.type().GetCategoryAndKind()};
   RUNTIME_CHECK(terminator, type);
   if (type->first == TypeCategory::Real) {
     ApplyFloatingPointKind<Norm2Helper, void>(
-        type->second, terminator, result, x, dim, mask, terminator);
+        type->second, terminator, result, x, dim, nullptr, terminator);
   } else {
     terminator.Crash("NORM2: bad type code %d", x.type().raw());
   }

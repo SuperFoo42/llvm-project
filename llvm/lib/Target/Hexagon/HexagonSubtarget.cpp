@@ -31,6 +31,7 @@
 #include <algorithm>
 #include <cassert>
 #include <map>
+#include <optional>
 
 using namespace llvm;
 
@@ -92,7 +93,7 @@ HexagonSubtarget::HexagonSubtarget(const Triple &TT, StringRef CPU,
 
 HexagonSubtarget &
 HexagonSubtarget::initializeSubtargetDependencies(StringRef CPU, StringRef FS) {
-  Optional<Hexagon::ArchEnum> ArchVer = Hexagon::getCpu(CPUString);
+  std::optional<Hexagon::ArchEnum> ArchVer = Hexagon::getCpu(CPUString);
   if (ArchVer)
     HexagonArchVersion = *ArchVer;
   else
@@ -222,7 +223,7 @@ bool HexagonSubtarget::isTypeForHVX(Type *VecTy, bool IncludeBool) const {
   // The given type may be something like <17 x i32>, which is not MVT,
   // but can be represented as (non-simple) EVT.
   EVT Ty = EVT::getEVT(VecTy, /*HandleUnknown*/false);
-  if (Ty.getSizeInBits() <= 64 || !Ty.getVectorElementType().isSimple())
+  if (!Ty.getVectorElementType().isSimple())
     return false;
 
   auto isHvxTy = [this, IncludeBool](MVT SimpleTy) {
@@ -236,7 +237,7 @@ bool HexagonSubtarget::isTypeForHVX(Type *VecTy, bool IncludeBool) const {
   // qualifies for HVX, dividing it in half after each step.
   MVT ElemTy = Ty.getVectorElementType().getSimpleVT();
   unsigned VecLen = PowerOf2Ceil(Ty.getVectorNumElements());
-  while (ElemTy.getSizeInBits() * VecLen > 64) {
+  while (VecLen > 1) {
     MVT SimpleTy = MVT::getVectorVT(ElemTy, VecLen);
     if (SimpleTy.isValid() && isHvxTy(SimpleTy))
       return true;

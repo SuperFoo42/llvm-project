@@ -16,7 +16,6 @@
 #include "clang/AST/Decl.h"
 #include "clang/Basic/Diagnostic.h"
 #include "llvm/ADT/PointerIntPair.h"
-#include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/iterator_range.h"
@@ -45,11 +44,11 @@ public:
   enum ScopeFlags {
     /// This indicates that the scope corresponds to a function, which
     /// means that labels are set here.
-    FnScope       = 0x01,
+    FnScope = 0x01,
 
     /// This is a while, do, switch, for, etc that can have break
     /// statements embedded into it.
-    BreakScope    = 0x02,
+    BreakScope = 0x02,
 
     /// This is a while, do, for, which can have continue statements
     /// embedded into it.
@@ -141,6 +140,10 @@ public:
     /// parsed. If such a scope is a ContinueScope, it's invalid to jump to the
     /// continue block from here.
     ConditionVarScope = 0x2000000,
+
+    /// This is a scope of some OpenMP directive with
+    /// order clause which specifies concurrent
+    OpenMPOrderClauseScope = 0x4000000,
   };
 
 private:
@@ -197,7 +200,7 @@ private:
   /// popped, these declarations are removed from the IdentifierTable's notion
   /// of current declaration.  It is up to the current Action implementation to
   /// implement these semantics.
-  using DeclSetTy = llvm::SmallSetVector<Decl *, 32>;
+  using DeclSetTy = llvm::SmallPtrSet<Decl *, 32>;
   DeclSetTy DeclsInScope;
 
   /// The DeclContext with which this scope is associated. For
@@ -216,7 +219,7 @@ private:
   ///  1) pointer to VarDecl that denotes NRVO candidate itself.
   ///  2) nullptr value means that NRVO is not allowed in this scope
   ///     (e.g. return a function parameter).
-  ///  3) None value means that there is no NRVO candidate in this scope
+  ///  3) std::nullopt value means that there is no NRVO candidate in this scope
   ///     (i.e. there are no return statements in this scope).
   Optional<VarDecl *> NRVO;
 
@@ -322,7 +325,7 @@ public:
     DeclsInScope.insert(D);
   }
 
-  void RemoveDecl(Decl *D) { DeclsInScope.remove(D); }
+  void RemoveDecl(Decl *D) { DeclsInScope.erase(D); }
 
   void incrementMSManglingNumber() {
     if (Scope *MSLMP = getMSLastManglingParent()) {
@@ -350,9 +353,7 @@ public:
 
   /// isDeclScope - Return true if this is the scope that the specified decl is
   /// declared in.
-  bool isDeclScope(const Decl *D) const {
-    return DeclsInScope.contains(const_cast<Decl *>(D));
-  }
+  bool isDeclScope(const Decl *D) const { return DeclsInScope.contains(D); }
 
   /// Get the entity corresponding to this scope.
   DeclContext *getEntity() const {
@@ -489,6 +490,12 @@ public:
   bool isOpenMPLoopScope() const {
     const Scope *P = getParent();
     return P && P->isOpenMPLoopDirectiveScope();
+  }
+
+  /// Determine whether this scope is some OpenMP directive with
+  /// order clause which specifies concurrent scope.
+  bool isOpenMPOrderClauseScope() const {
+    return getFlags() & Scope::OpenMPOrderClauseScope;
   }
 
   /// Determine whether this scope is a while/do/for statement, which can have

@@ -31,7 +31,6 @@ using namespace llvm;
 /// ScalarOpts library.
 void llvm::initializeScalarOpts(PassRegistry &Registry) {
   initializeADCELegacyPassPass(Registry);
-  initializeAnnotationRemarksLegacyPass(Registry);
   initializeBDCELegacyPassPass(Registry);
   initializeAlignmentFromAssumptionsPass(Registry);
   initializeCallSiteSplittingLegacyPassPass(Registry);
@@ -104,6 +103,8 @@ void llvm::initializeScalarOpts(PassRegistry &Registry) {
   initializeSeparateConstOffsetFromGEPLegacyPassPass(Registry);
   initializeSpeculativeExecutionLegacyPassPass(Registry);
   initializeStraightLineStrengthReduceLegacyPassPass(Registry);
+  initializePlaceBackedgeSafepointsImplPass(Registry);
+  initializePlaceSafepointsPass(Registry);
   initializeFloat2IntLegacyPassPass(Registry);
   initializeLoopDistributeLegacyPass(Registry);
   initializeLoopLoadEliminationPass(Registry);

@@ -52,6 +52,9 @@ NVPTXTargetInfo::NVPTXTargetInfo(const llvm::Triple &Triple,
   VLASupported = false;
   AddrSpaceMap = &NVPTXAddrSpaceMap;
   UseAddrSpaceMapMangling = true;
+  // __bf16 is always available as a load/store only type.
+  BFloat16Width = BFloat16Align = 16;
+  BFloat16Format = &llvm::APFloat::BFloat();
 
   // Define available target features
   // These must be defined in sorted order!
@@ -94,8 +97,8 @@ NVPTXTargetInfo::NVPTXTargetInfo(const llvm::Triple &Triple,
   }
 
   // Copy properties from host target.
-  PointerWidth = HostTarget->getPointerWidth(/* AddrSpace = */ 0);
-  PointerAlign = HostTarget->getPointerAlign(/* AddrSpace = */ 0);
+  PointerWidth = HostTarget->getPointerWidth(LangAS::Default);
+  PointerAlign = HostTarget->getPointerAlign(LangAS::Default);
   BoolWidth = HostTarget->getBoolWidth();
   BoolAlign = HostTarget->getBoolAlign();
   IntWidth = HostTarget->getIntWidth();
@@ -116,7 +119,7 @@ NVPTXTargetInfo::NVPTXTargetInfo(const llvm::Triple &Triple,
       HostTarget->getDefaultAlignForAttributeAligned();
   SizeType = HostTarget->getSizeType();
   IntMaxType = HostTarget->getIntMaxType();
-  PtrDiffType = HostTarget->getPtrDiffType(/* AddrSpace = */ 0);
+  PtrDiffType = HostTarget->getPtrDiffType(LangAS::Default);
   IntPtrType = HostTarget->getIntPtrType();
   WCharType = HostTarget->getWCharType();
   WIntType = HostTarget->getWIntType();

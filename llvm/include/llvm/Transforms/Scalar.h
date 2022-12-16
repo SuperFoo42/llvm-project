@@ -33,12 +33,6 @@ FunctionPass *createAlignmentFromAssumptionsPass();
 
 //===----------------------------------------------------------------------===//
 //
-// AnnotationRemarks - Emit remarks for !annotation metadata.
-//
-FunctionPass *createAnnotationRemarksLegacyPass();
-
-//===----------------------------------------------------------------------===//
-//
 // SCCP - Sparse conditional constant propagation.
 //
 FunctionPass *createSCCPPass();
@@ -111,7 +105,7 @@ FunctionPass *createBitTrackingDCEPass();
 //
 // SROA - Replace aggregates or pieces of aggregates with scalar SSA values.
 //
-FunctionPass *createSROAPass();
+FunctionPass *createSROAPass(bool PreserveCFG = true);
 
 //===----------------------------------------------------------------------===//
 //
@@ -461,6 +455,16 @@ FunctionPass *createSpeculativeExecutionIfHasBranchDivergencePass();
 // instruction patterns in straight-line code.
 //
 FunctionPass *createStraightLineStrengthReducePass();
+
+//===----------------------------------------------------------------------===//
+//
+// PlaceSafepoints - Rewrite any IR calls to gc.statepoints and insert any
+// safepoint polls (method entry, backedge) that might be required.  This pass
+// does not generate explicit relocation sequences - that's handled by
+// RewriteStatepointsForGC which can be run at an arbitrary point in the pass
+// order following this pass.
+//
+FunctionPass *createPlaceSafepointsPass();
 
 //===----------------------------------------------------------------------===//
 //
