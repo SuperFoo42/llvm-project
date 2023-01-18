@@ -1051,7 +1051,7 @@ inline void consumeError(Error Err) {
 /// Uses of this method are potentially indicative of problems: perhaps the
 /// error should be propagated further, or the error-producer should just
 /// return an Optional in the first place.
-template <typename T> Optional<T> expectedToOptional(Expected<T> &&E) {
+template <typename T> std::optional<T> expectedToOptional(Expected<T> &&E) {
   if (E)
     return std::move(*E);
   consumeError(E.takeError());
@@ -1277,7 +1277,7 @@ public:
     assert(Err && "Trying to log after takeError().");
     OS << "'" << FileName << "': ";
     if (Line)
-      OS << "line " << Line.value() << ": ";
+      OS << "line " << *Line << ": ";
     Err->log(OS);
   }
 

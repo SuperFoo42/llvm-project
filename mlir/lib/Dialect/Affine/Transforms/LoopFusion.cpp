@@ -328,11 +328,13 @@ public:
   }
 
   // Returns true if there is a path in the dependence graph from node 'srcId'
-  // to node 'dstId'. Returns false otherwise.
+  // to node 'dstId'. Returns false otherwise. `srcId`, `dstId`, and the
+  // operations that the edges connected are expected to be from the same block.
   bool hasDependencePath(unsigned srcId, unsigned dstId) {
     // Worklist state is: <node-id, next-output-edge-index-to-visit>
     SmallVector<std::pair<unsigned, unsigned>, 4> worklist;
     worklist.push_back({srcId, 0});
+    Operation *dstOp = getNode(dstId)->op;
     // Run DFS traversal to see if 'dstId' is reachable from 'srcId'.
     while (!worklist.empty()) {
       auto &idAndIndex = worklist.back();
@@ -350,8 +352,12 @@ public:
       Edge edge = outEdges[idAndIndex.first][idAndIndex.second];
       // Increment next output edge index for 'idAndIndex'.
       ++idAndIndex.second;
-      // Add node at 'edge.id' to worklist.
-      worklist.push_back({edge.id, 0});
+      // Add node at 'edge.id' to the worklist. We don't need to consider
+      // nodes that are "after" dstId in the containing block; one can't have a
+      // path to `dstId` from any of those nodes.
+      bool afterDst = dstOp->isBeforeInBlock(getNode(edge.id)->op);
+      if (!afterDst && edge.id != idAndIndex.first)
+        worklist.push_back({edge.id, 0});
     }
     return false;
   }
@@ -453,13 +459,13 @@ public:
 
     if (firstSrcDepPos.has_value()) {
       if (lastDstDepPos.has_value()) {
-        if (firstSrcDepPos.value() <= lastDstDepPos.value()) {
+        if (*firstSrcDepPos <= *lastDstDepPos) {
           // No valid insertion point exists which preserves dependences.
           return nullptr;
         }
       }
       // Return the insertion point at 'firstSrcDepPos'.
-      return depInsts[firstSrcDepPos.value()];
+      return depInsts[*firstSrcDepPos];
     }
     // No dependence targets in range (or only dst deps in range), return
     // 'dstNodInst' insertion point.
@@ -645,7 +651,7 @@ static bool canRemoveSrcNodeAfterFusion(
   // escaping memref, we can only remove it if the fusion slice is maximal so
   // that all the dependences are preserved.
   if (hasOutDepsAfterFusion || !escapingMemRefs.empty()) {
-    Optional<bool> isMaximal = fusionSlice.isMaximal();
+    std::optional<bool> isMaximal = fusionSlice.isMaximal();
     if (!isMaximal) {
       LLVM_DEBUG(llvm::dbgs() << "Src loop can't be removed: can't determine "
                                  "if fusion is maximal\n");
@@ -858,7 +864,7 @@ bool MemRefDependenceGraph::init(Block *block) {
             block)
           continue;
         SmallVector<AffineForOp, 4> loops;
-        getLoopIVs(*user, &loops);
+        getAffineForIVs(*user, &loops);
         if (loops.empty())
           continue;
         assert(forToNodeMap.count(loops[0]) > 0 && "missing mapping");
@@ -920,7 +926,7 @@ static unsigned getMemRefEltSizeInBytes(MemRefType memRefType) {
 // this one.
 static Value createPrivateMemRef(AffineForOp forOp, Operation *srcStoreOpInst,
                                  unsigned dstLoopDepth,
-                                 Optional<unsigned> fastMemorySpace,
+                                 std::optional<unsigned> fastMemorySpace,
                                  uint64_t localBufSizeThreshold) {
   Operation *forInst = forOp.getOperation();
 
@@ -944,7 +950,7 @@ static Value createPrivateMemRef(AffineForOp forOp, Operation *srcStoreOpInst,
   lbs.reserve(rank);
   // Query 'region' for 'newShape' and lower bounds of MemRefRegion accessed
   // by 'srcStoreOpInst' at depth 'dstLoopDepth'.
-  Optional<int64_t> numElements =
+  std::optional<int64_t> numElements =
       region.getConstantBoundingSizeAndShape(&newShape, &lbs, &lbDivisors);
   assert(numElements && "non-constant number of elts in local buffer");
 
@@ -973,11 +979,10 @@ static Value createPrivateMemRef(AffineForOp forOp, Operation *srcStoreOpInst,
 
   // Create 'newMemRefType' using 'newShape' from MemRefRegion accessed
   // by 'srcStoreOpInst'.
-  uint64_t bufSize =
-      getMemRefEltSizeInBytes(oldMemRefType) * numElements.value();
+  uint64_t bufSize = getMemRefEltSizeInBytes(oldMemRefType) * *numElements;
   unsigned newMemSpace;
   if (bufSize <= localBufSizeThreshold && fastMemorySpace.has_value()) {
-    newMemSpace = fastMemorySpace.value();
+    newMemSpace = *fastMemorySpace;
   } else {
     newMemSpace = oldMemRefType.getMemorySpaceAsInt();
   }
@@ -1135,7 +1140,7 @@ static bool isFusionProfitable(Operation *srcOpInst, Operation *srcStoreOpInst,
 
   // Compute cost of sliced and unsliced src loop nest.
   SmallVector<AffineForOp, 4> srcLoopIVs;
-  getLoopIVs(*srcOpInst, &srcLoopIVs);
+  getAffineForIVs(*srcOpInst, &srcLoopIVs);
 
   // Walk src loop nest and collect stats.
   LoopNestStats srcLoopNestStats;
@@ -1171,11 +1176,11 @@ static bool isFusionProfitable(Operation *srcOpInst, Operation *srcStoreOpInst,
     return false;
   }
 
-  Optional<int64_t> maybeSrcWriteRegionSizeBytes =
+  std::optional<int64_t> maybeSrcWriteRegionSizeBytes =
       srcWriteRegion.getRegionSize();
   if (!maybeSrcWriteRegionSizeBytes.has_value())
     return false;
-  int64_t srcWriteRegionSizeBytes = maybeSrcWriteRegionSizeBytes.value();
+  int64_t srcWriteRegionSizeBytes = *maybeSrcWriteRegionSizeBytes;
 
   // Compute op instance count for the src loop nest.
   uint64_t dstLoopNestCost = getComputeCost(dstForOp, dstLoopNestStats);
@@ -1213,16 +1218,16 @@ static bool isFusionProfitable(Operation *srcOpInst, Operation *srcStoreOpInst,
       continue;
     }
 
-    Optional<int64_t> maybeSliceWriteRegionSizeBytes =
+    std::optional<int64_t> maybeSliceWriteRegionSizeBytes =
         sliceWriteRegion.getRegionSize();
     if (!maybeSliceWriteRegionSizeBytes.has_value() ||
-        maybeSliceWriteRegionSizeBytes.value() == 0) {
+        *maybeSliceWriteRegionSizeBytes == 0) {
       LLVM_DEBUG(llvm::dbgs()
                  << "Failed to get slice write region size at loopDepth: " << i
                  << "\n");
       continue;
     }
-    int64_t sliceWriteRegionSizeBytes = maybeSliceWriteRegionSizeBytes.value();
+    int64_t sliceWriteRegionSizeBytes = *maybeSliceWriteRegionSizeBytes;
 
     // If we are fusing for reuse, check that write regions remain the same.
     // TODO: Write region check should check sizes and offsets in
@@ -1299,11 +1304,11 @@ static bool isFusionProfitable(Operation *srcOpInst, Operation *srcStoreOpInst,
     return false;
   }
 
-  auto srcMemSizeVal = srcMemSize.value();
-  auto dstMemSizeVal = dstMemSize.value();
+  auto srcMemSizeVal = *srcMemSize;
+  auto dstMemSizeVal = *dstMemSize;
 
   assert(sliceMemEstimate && "expected value");
-  auto fusedMem = dstMemSizeVal + sliceMemEstimate.value();
+  auto fusedMem = dstMemSizeVal + *sliceMemEstimate;
 
   LLVM_DEBUG(llvm::dbgs() << "   src mem: " << srcMemSizeVal << "\n"
                           << "   dst mem: " << dstMemSizeVal << "\n"
@@ -1393,7 +1398,7 @@ public:
   // Parameter for local buffer size threshold.
   unsigned localBufSizeThreshold;
   // Parameter for fast memory space.
-  Optional<unsigned> fastMemorySpace;
+  std::optional<unsigned> fastMemorySpace;
   // If true, ignore any additional (redundant) computation tolerance threshold
   // that would have prevented fusion.
   bool maximalFusion;
@@ -1404,7 +1409,7 @@ public:
   using Node = MemRefDependenceGraph::Node;
 
   GreedyFusion(MemRefDependenceGraph *mdg, unsigned localBufSizeThreshold,
-               Optional<unsigned> fastMemorySpace, bool maximalFusion,
+               std::optional<unsigned> fastMemorySpace, bool maximalFusion,
                double computeToleranceThreshold)
       : mdg(mdg), localBufSizeThreshold(localBufSizeThreshold),
         fastMemorySpace(fastMemorySpace), maximalFusion(maximalFusion),
@@ -1785,7 +1790,7 @@ public:
       dstNode->getLoadOpsForMemref(memref, &dstLoadOpInsts);
 
       SmallVector<AffineForOp, 4> dstLoopIVs;
-      getLoopIVs(*dstLoadOpInsts[0], &dstLoopIVs);
+      getAffineForIVs(*dstLoadOpInsts[0], &dstLoopIVs);
       unsigned dstLoopDepthTest = dstLoopIVs.size();
       auto sibAffineForOp = cast<AffineForOp>(sibNode->op);
 
@@ -1892,7 +1897,7 @@ public:
           continue;
         // Gather loops surrounding 'use'.
         SmallVector<AffineForOp, 4> loops;
-        getLoopIVs(*user, &loops);
+        getAffineForIVs(*user, &loops);
         // Skip 'use' if it is not within a loop nest.
         if (loops.empty())
           continue;
@@ -2011,7 +2016,7 @@ void LoopFusion::runOnBlock(Block *block) {
   if (!g.init(block))
     return;
 
-  Optional<unsigned> fastMemorySpaceOpt;
+  std::optional<unsigned> fastMemorySpaceOpt;
   if (fastMemorySpace.hasValue())
     fastMemorySpaceOpt = fastMemorySpace;
   unsigned localBufSizeThresholdBytes = localBufSizeThreshold * 1024;

@@ -336,7 +336,7 @@ bool DataAggregator::checkPerfDataMagic(StringRef FileName) {
 
   auto Close = make_scope_exit([&] { sys::fs::closeFile(*FD); });
   Expected<size_t> BytesRead = sys::fs::readNativeFileSlice(
-      *FD, makeMutableArrayRef(Buf, sizeof(Buf)), 0);
+      *FD, MutableArrayRef(Buf, sizeof(Buf)), 0);
   if (!BytesRead) {
     consumeError(BytesRead.takeError());
     return false;
@@ -646,7 +646,7 @@ void DataAggregator::processProfile(BinaryContext &BC) {
   // Mark all functions with registered events as having a valid profile.
   for (auto &BFI : BC.getBinaryFunctions()) {
     BinaryFunction &BF = BFI.second;
-    if (getBranchData(BF)) {
+    if (getBranchData(BF) || getFuncSampleData(BF.getNames())) {
       const auto Flags = opts::BasicAggregation ? BinaryFunction::PF_SAMPLE
                                                 : BinaryFunction::PF_LBR;
       BF.markProfiled(Flags);
