@@ -243,7 +243,7 @@ void mlir::linalg::peelLoops(RewriterBase &rewriter,
     loopResults = peelLoop(rewriter, loopOp);
   }
 }
-
+/*TODO: needed?
 /// Peel loops after tiling.
 void mlir::linalg::peelTiledLinalgOp(RewriterBase &rewriter, TiledLinalgOp &res,
                                      ArrayRef<int64_t> peeledLoops,
@@ -281,7 +281,7 @@ mlir::linalg::tileWithLinalgTilingOptions(RewriterBase &rewriter, LinalgOp op,
     rewriter.replaceOp(op, res->tensorResults);
 
   return res;
-}
+}*/
 
 /// Linalg padding pattern.
 mlir::linalg::LinalgPaddingPattern::LinalgPaddingPattern(

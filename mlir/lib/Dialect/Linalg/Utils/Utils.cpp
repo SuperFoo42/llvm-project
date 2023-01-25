@@ -520,7 +520,7 @@ void GenerateLoopNest<AffineForOp>::doit(
     ArrayRef<linalg::ProcInfo> /*procInfo*/) {
   SmallVector<Value> iterArgInitValues = linalgOp.hasBufferSemantics()
                                              ? SmallVector<Value>{}
-                                             : linalgOp.getDpsInitOperands() //linalgOp.getOutputTensorOperands();
+                                             : linalgOp.getDpsInitOperands();
   assert(iterArgInitValues.empty() && "unexpected AffineForOp init values");
   SmallVector<Value, 4> lbs, ubs, steps;
   unpackRanges(b, loc, loopRanges, lbs, ubs, steps);
@@ -534,15 +534,21 @@ void GenerateLoopNest<AffineForOp>::doit(
     constantSteps.push_back(op.value());
   }
 
-  // load values for iter args used in reductions
+  mlir::buildAffineLoopNest(b, loc, lbs, ubs, constantSteps,
+                            [&](OpBuilder &b, Location loc, ValueRange ivs) {
+                              bodyBuilderFn(b, loc, ivs,
+                                            linalgOp->getOperands());
+                            });
+
+/* TODO: needed? // load values for iter args used in reductions
   llvm::SmallDenseMap<OpOperand *, Value, 4> memrefValueMapping;
   for (const auto &val : llvm::enumerate(llvm::zip(
-           linalgOp.getOutputOperands(), linalgOp.iterator_types()))) {
-    Attribute iter_arg;
+           linalgOp.getDpsInitOperands(), linalgOp.getIteratorTypesArray()))) {
+    utils::IteratorType iter_arg;
     OpOperand *op;
     std::tie(op, iter_arg) = val.value();
     // TODO: check only read uses in loop, except last statement store?
-    if (isReductionIterator(iter_arg.dyn_cast<StringAttr>()) &&
+    if (isReductionIterator(iter_arg) &&
         op->get().getType().dyn_cast<MemRefType>().getNumElements() == 1) {
       memrefValueMapping.insert(
           std::make_pair(op, b.create<memref::LoadOp>(loc, op->get())));
@@ -562,7 +568,7 @@ void GenerateLoopNest<AffineForOp>::doit(
                  ValueRange iter_args) {
                llvm::SmallDenseMap<OpOperand *, Value> iterArgMapping;
                iterArgMapping.reserve(iter_args.size());
-              for (const auto &op : linalgOp.getOutputOperands())
+              for (const auto &op : linalgOp.getDpsInitOperands())
                {
                 if (memrefValueMapping.lookup(op) != Value())
                 {
@@ -585,7 +591,7 @@ void GenerateLoopNest<AffineForOp>::doit(
                               [&](OpBuilder &b, Location loc, ValueRange ivs) {
                                 bodyBuilderFn(b, loc, ivs, linalgOp->getOperands());
                               });
-  }
+  }*/
 }
 
 /// Update the `lb`, `ub` and `step` to get per processor `lb`, `ub` and `step`.

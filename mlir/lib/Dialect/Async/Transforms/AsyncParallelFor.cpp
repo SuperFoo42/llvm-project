@@ -454,7 +454,7 @@ static ParallelComputeFunction createParallelComputeFunction(
       for (auto &bodyOp : op.getLoopBody().getOps()) {
         if (isa<scf::ReduceOp>(bodyOp)) { // reduction on single iter_arg
           auto redOp = dyn_cast<scf::ReduceOp>(bodyOp);
-          BlockAndValueMapping reductionMapping = mapping;
+          auto reductionMapping = mapping;
           reductionMapping.map(redOp.getReductionOperator().getArgument(0),
                                args.take_front().front());
           reductionMapping.map(redOp.getReductionOperator().getArgument(1),

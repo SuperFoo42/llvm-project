@@ -493,7 +493,7 @@ struct GenerateLoopNest {
                    function_ref<scf::ValueVector(OpBuilder &, Location,
                                                  ValueRange, llvm::SmallDenseMap<OpOperand *, Value>)>
                        bodyBuilderFn,
-                   Optional<LinalgLoopDistributionOptions> = None,
+                   Optional<LinalgLoopDistributionOptions> = Optional<LinalgLoopDistributionOptions>(),
                    ArrayRef<StringRef> distributionTypes = {});
 };
 
