@@ -596,7 +596,8 @@ public:
                                   MachineBasicBlock *BB) const;
   MachineBasicBlock *EmitFill(MachineInstr &MI, MachineBasicBlock *BB) const;
   MachineBasicBlock *EmitZAInstr(unsigned Opc, unsigned BaseReg,
-                                 MachineInstr &MI, MachineBasicBlock *BB) const;
+                                 MachineInstr &MI, MachineBasicBlock *BB,
+                                 bool HasTile) const;
   MachineBasicBlock *EmitZero(MachineInstr &MI, MachineBasicBlock *BB) const;
 
   MachineBasicBlock *
@@ -705,6 +706,8 @@ public:
 
   bool isOpSuitableForLDPSTP(const Instruction *I) const;
   bool shouldInsertFencesForAtomic(const Instruction *I) const override;
+  bool
+  shouldInsertTrailingFenceForAtomicStore(const Instruction *I) const override;
 
   TargetLoweringBase::AtomicExpansionKind
   shouldExpandAtomicLoadInIR(LoadInst *LI) const override;

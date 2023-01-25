@@ -756,7 +756,7 @@ static void doAsyncDispatch(ImplicitLocOpBuilder &b, PatternRewriter &rewriter,
   };
 
   // Dispatch either single block compute function, or launch async dispatch.
-  b.create<scf::IfOp>(TypeRange(), isSingleBlock, syncDispatch, asyncDispatch);
+  b.create<scf::IfOp>(isSingleBlock, syncDispatch, asyncDispatch);
 }
 
 // Dispatch parallel compute functions by submitting all async compute tasks
@@ -1047,8 +1047,8 @@ AsyncParallelForRewrite::matchAndRewrite(scf::ParallelOp op,
       Value useBlockAlignedComputeFn = b.create<arith::CmpIOp>(
           arith::CmpIPredicate::sge, blockSize, numIters);
 
-      b.create<scf::IfOp>(TypeRange(), useBlockAlignedComputeFn,
-                          dispatchBlockAligned, dispatchDefault);
+      b.create<scf::IfOp>(useBlockAlignedComputeFn, dispatchBlockAligned,
+                          dispatchDefault);
       b.create<scf::YieldOp>();
     } else {
       dispatchDefault(b, loc);
@@ -1056,7 +1056,7 @@ AsyncParallelForRewrite::matchAndRewrite(scf::ParallelOp op,
   };
 
   // Replace the `scf.parallel` operation with the parallel compute function.
-  b.create<scf::IfOp>(TypeRange(), isZeroIterations, noOp, dispatch);
+  b.create<scf::IfOp>(isZeroIterations, noOp, dispatch);
 
   // if parallel loop has no reductions, just erase loop, otherwise replace with
   // reduction results
