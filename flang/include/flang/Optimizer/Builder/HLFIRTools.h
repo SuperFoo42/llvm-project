@@ -246,6 +246,10 @@ mlir::Value genVariableRawAddress(mlir::Location loc,
 mlir::Value genVariableBoxChar(mlir::Location loc, fir::FirOpBuilder &builder,
                                hlfir::Entity var);
 
+/// Get or create a fir.box or fir.class from a variable.
+hlfir::Entity genVariableBox(mlir::Location loc, fir::FirOpBuilder &builder,
+                             hlfir::Entity var);
+
 /// If the entity is a variable, load its value (dereference pointers and
 /// allocatables if needed). Do nothing if the entity is already a value, and
 /// only dereference pointers and allocatables if it is not a scalar entity
@@ -275,6 +279,16 @@ genBounds(mlir::Location loc, fir::FirOpBuilder &builder, mlir::Value shape);
 /// Compute fir.shape<> (no lower bounds) for an entity.
 mlir::Value genShape(mlir::Location loc, fir::FirOpBuilder &builder,
                      Entity entity);
+
+/// Compute the extent of \p entity in dimension \p dim. Crashes
+/// if dim is bigger than the entity's rank.
+mlir::Value genExtent(mlir::Location loc, fir::FirOpBuilder &builder,
+                      hlfir::Entity entity, unsigned dim);
+
+/// Compute the lower bound of \p entity in dimension \p dim. Crashes
+/// if dim is bigger than the entity's rank.
+mlir::Value genLBound(mlir::Location loc, fir::FirOpBuilder &builder,
+                      hlfir::Entity entity, unsigned dim);
 
 /// Generate a vector of extents with index type from a fir.shape
 /// of fir.shape_shift value.

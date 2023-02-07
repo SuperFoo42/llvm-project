@@ -2694,6 +2694,8 @@ public:
     case ISD::AVGFLOORU:
     case ISD::AVGCEILS:
     case ISD::AVGCEILU:
+    case ISD::ABDS:
+    case ISD::ABDU:
       return true;
     default: return false;
     }
@@ -4486,6 +4488,12 @@ public:
   /// scratch registers.
   virtual const MCPhysReg *getScratchRegisters(CallingConv::ID CC) const {
     return nullptr;
+  }
+
+  /// Returns a 0 terminated array of rounding control registers that can be
+  /// attached into strict FP call.
+  virtual ArrayRef<MCPhysReg> getRoundingControlRegisters() const {
+    return ArrayRef<MCPhysReg>();
   }
 
   /// This callback is used to prepare for a volatile or atomic load.

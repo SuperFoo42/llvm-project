@@ -475,8 +475,10 @@ enum NodeType : unsigned {
   STZ2G,
 
   LDP,
+  LDIAPP,
   LDNP,
   STP,
+  STILP,
   STNP,
 
   // Memory Operations
@@ -668,6 +670,7 @@ public:
                                      CodeGenOpt::Level OptLevel) const override;
 
   const MCPhysReg *getScratchRegisters(CallingConv::ID CC) const override;
+  ArrayRef<MCPhysReg> getRoundingControlRegisters() const override;
 
   /// Returns false if N is a bit extraction pattern of (X >> C) & Mask.
   bool isDesirableToCommuteWithShift(const SDNode *N,
@@ -705,6 +708,7 @@ public:
   void emitAtomicCmpXchgNoStoreLLBalance(IRBuilderBase &Builder) const override;
 
   bool isOpSuitableForLDPSTP(const Instruction *I) const;
+  bool isOpSuitableForRCPC3(const Instruction *I) const;
   bool shouldInsertFencesForAtomic(const Instruction *I) const override;
   bool
   shouldInsertTrailingFenceForAtomicStore(const Instruction *I) const override;

@@ -574,6 +574,7 @@ struct CheckFallThroughDiagnostics {
     D.diag_AlwaysFallThrough_HasNoReturn = 0;
     D.diag_AlwaysFallThrough_ReturnsNonVoid =
         diag::warn_falloff_nonvoid_coroutine;
+    D.diag_NeverFallThroughOrReturn = 0;
     D.funMode = Coroutine;
     return D;
   }
@@ -2184,6 +2185,9 @@ public:
         MsgParam = 1;
       }
     } else {
+      if (isa<CallExpr>(Operation)) {
+        MsgParam = 3;
+      }
       Loc = Operation->getBeginLoc();
       Range = Operation->getSourceRange();
     }

@@ -15,6 +15,7 @@
 #define LLVM_LIB_TARGET_AMDGPU_GCNSUBTARGET_H
 
 #include "AMDGPUCallLowering.h"
+#include "AMDGPURegisterBankInfo.h"
 #include "AMDGPUSubtarget.h"
 #include "SIFrameLowering.h"
 #include "SIISelLowering.h"
@@ -51,7 +52,7 @@ private:
   std::unique_ptr<InlineAsmLowering> InlineAsmLoweringInfo;
   std::unique_ptr<InstructionSelector> InstSelector;
   std::unique_ptr<LegalizerInfo> Legalizer;
-  std::unique_ptr<RegisterBankInfo> RegBankInfo;
+  std::unique_ptr<AMDGPURegisterBankInfo> RegBankInfo;
 
 protected:
   // Basic subtarget description.
@@ -146,6 +147,7 @@ protected:
   bool HasDot7Insts = false;
   bool HasDot8Insts = false;
   bool HasDot9Insts = false;
+  bool HasDot10Insts = false;
   bool HasMAIInsts = false;
   bool HasFP8Insts = false;
   bool HasPkFmacF16Inst = false;
@@ -248,7 +250,7 @@ public:
     return Legalizer.get();
   }
 
-  const RegisterBankInfo *getRegBankInfo() const override {
+  const AMDGPURegisterBankInfo *getRegBankInfo() const override {
     return RegBankInfo.get();
   }
 
@@ -283,7 +285,7 @@ public:
 
   /// Return the number of high bits known to be zero for a frame index.
   unsigned getKnownHighZeroBitsForFrameIndex() const {
-    return countLeadingZeros(getMaxWaveScratchSize()) + getWavefrontSizeLog2();
+    return llvm::countl_zero(getMaxWaveScratchSize()) + getWavefrontSizeLog2();
   }
 
   int getLDSBankCount() const {
@@ -736,6 +738,10 @@ public:
 
   bool hasDot9Insts() const {
     return HasDot9Insts;
+  }
+
+  bool hasDot10Insts() const {
+    return HasDot10Insts;
   }
 
   bool hasMAIInsts() const {

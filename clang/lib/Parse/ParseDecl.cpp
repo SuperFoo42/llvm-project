@@ -4965,7 +4965,6 @@ void Parser::ParseEnumSpecifier(SourceLocation StartLoc, DeclSpec &DS,
   bool IsDependent = false;
   const char *PrevSpec = nullptr;
   unsigned DiagID;
-  UsingShadowDecl* FoundUsing = nullptr;
   Decl *TagDecl =
       Actions.ActOnTag(getCurScope(), DeclSpec::TST_enum, TUK, StartLoc, SS,
                     Name, NameLoc, attrs, AS, DS.getModulePrivateSpecLoc(),
@@ -4974,7 +4973,7 @@ void Parser::ParseEnumSpecifier(SourceLocation StartLoc, DeclSpec &DS,
                     BaseType, DSC == DeclSpecContext::DSC_type_specifier,
                     DSC == DeclSpecContext::DSC_template_param ||
                         DSC == DeclSpecContext::DSC_template_type_arg,
-                    OffsetOfState, FoundUsing, &SkipBody).get();
+                    OffsetOfState, &SkipBody).get();
 
   if (SkipBody.ShouldSkip) {
     assert(TUK == Sema::TUK_Definition && "can only skip a definition");
@@ -4984,8 +4983,8 @@ void Parser::ParseEnumSpecifier(SourceLocation StartLoc, DeclSpec &DS,
     T.skipToEnd();
 
     if (DS.SetTypeSpecType(DeclSpec::TST_enum, StartLoc,
-                           NameLoc.isValid() ? NameLoc : StartLoc, PrevSpec,
-                           DiagID, FoundUsing ? FoundUsing : TagDecl, Owned,
+                           NameLoc.isValid() ? NameLoc : StartLoc,
+                           PrevSpec, DiagID, TagDecl, Owned,
                            Actions.getASTContext().getPrintingPolicy()))
       Diag(StartLoc, DiagID) << PrevSpec;
     return;
@@ -5039,8 +5038,8 @@ void Parser::ParseEnumSpecifier(SourceLocation StartLoc, DeclSpec &DS,
   }
 
   if (DS.SetTypeSpecType(DeclSpec::TST_enum, StartLoc,
-                         NameLoc.isValid() ? NameLoc : StartLoc, PrevSpec,
-                         DiagID, FoundUsing ? FoundUsing : TagDecl, Owned,
+                         NameLoc.isValid() ? NameLoc : StartLoc,
+                         PrevSpec, DiagID, TagDecl, Owned,
                          Actions.getASTContext().getPrintingPolicy()))
     Diag(StartLoc, DiagID) << PrevSpec;
 }
@@ -6988,6 +6987,15 @@ void Parser::ParseFunctionDeclarator(Declarator &D,
         continue;
       DeclsInPrototype.push_back(ND);
     }
+    // Sort DeclsInPrototype based on raw encoding of the source location.
+    // Scope::decls() is iterating over a SmallPtrSet so sort the Decls before
+    // moving to DeclContext. This provides a stable ordering for traversing
+    // Decls in DeclContext, which is important for tasks like ASTWriter for
+    // deterministic output.
+    llvm::sort(DeclsInPrototype, [](Decl *D1, Decl *D2) {
+      return D1->getLocation().getRawEncoding() <
+             D2->getLocation().getRawEncoding();
+    });
   }
 
   // Remember that we parsed a function type, and remember the attributes.

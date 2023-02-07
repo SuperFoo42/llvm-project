@@ -15,6 +15,7 @@
 #include "mlir/IR/DialectImplementation.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/OpImplementation.h"
+#include "mlir/IR/PatternMatch.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/FormatVariadic.h"
 
@@ -27,6 +28,15 @@
 
 using namespace mlir;
 using namespace mlir::sparse_tensor;
+
+//===----------------------------------------------------------------------===//
+// Additional convenience methods.
+//===----------------------------------------------------------------------===//
+
+template <typename T>
+static inline int64_t getTypeRank(T t) {
+  return getRankedTensorType(t).getRank();
+}
 
 //===----------------------------------------------------------------------===//
 // TensorDialect Attribute Methods.
@@ -431,6 +441,44 @@ unsigned mlir::sparse_tensor::getCOOStart(SparseTensorEncodingAttr enc) {
   return rank;
 }
 
+// Helpers to setup a COO type.
+RankedTensorType sparse_tensor::getCOOFromTypeWithOrdering(RankedTensorType src,
+                                                           AffineMap ordering,
+                                                           bool ordered) {
+  auto *ctx = src.getContext();
+  auto rank = src.getRank();
+  SmallVector<DimLevelType> dims;
+
+  // An unordered and non-unique compressed dim at beginning.
+  // If this is also the last dimension, then it is unique.
+  dims.push_back(*getDimLevelType(LevelFormat::Compressed, ordered, rank == 1));
+  if (rank > 1) {
+    // TODO: it is actually ordered at the level for ordered input.
+    // Followed by unordered non-unique n-2 singleton levels.
+    std::fill_n(std::back_inserter(dims), rank - 2,
+                *getDimLevelType(LevelFormat::Singleton, ordered, false));
+    // Ends by a unique singleton level unless the tensor rank is 1.
+    dims.push_back(*getDimLevelType(LevelFormat::Singleton, ordered, true));
+  }
+
+  SparseTensorEncodingAttr encSrc = getSparseTensorEncoding(src);
+  // TODO: Maybe pick the bitwidth based on input/output tensors (probably the
+  // largest one among them) in the original operation instead of using the
+  // default value.
+  unsigned pointerBitWidth = encSrc ? encSrc.getPointerBitWidth() : 0;
+  unsigned indexBitWidth = encSrc ? encSrc.getIndexBitWidth() : 0;
+  auto enc = SparseTensorEncodingAttr::get(ctx, dims, ordering, AffineMap(),
+                                           pointerBitWidth, indexBitWidth);
+  return RankedTensorType::get(src.getShape(), src.getElementType(), enc);
+}
+
+RankedTensorType sparse_tensor::getCOOFromType(RankedTensorType src,
+                                               bool ordered) {
+  return getCOOFromTypeWithOrdering(
+      src, AffineMap::getMultiDimIdentityMap(src.getRank(), src.getContext()),
+      ordered);
+}
+
 uint64_t mlir::sparse_tensor::toOrigDim(SparseTensorEncodingAttr enc,
                                         uint64_t d) {
   if (enc) {
@@ -525,12 +573,11 @@ Type StorageSpecifierType::getFieldType(StorageSpecifierKind kind,
 //===----------------------------------------------------------------------===//
 
 static LogicalResult isInBounds(uint64_t dim, Value tensor) {
-  return success(dim <
-                 (uint64_t)tensor.getType().cast<RankedTensorType>().getRank());
+  return success(dim < static_cast<uint64_t>(getTypeRank(tensor)));
 }
 
 static LogicalResult isMatchingWidth(Value result, unsigned width) {
-  const Type etp = result.getType().cast<MemRefType>().getElementType();
+  const Type etp = getMemRefType(result).getElementType();
   return success(width == 0 ? etp.isIndex() : etp.isInteger(width));
 }
 
@@ -562,9 +609,44 @@ static LogicalResult verifySparsifierGetterSetter(
 }
 
 LogicalResult NewOp::verify() {
-  if (getExpandSymmetry() &&
-      getResult().getType().cast<RankedTensorType>().getRank() != 2)
+  if (getExpandSymmetry() && getTypeRank(getResult()) != 2)
     return emitOpError("expand_symmetry can only be used for 2D tensors");
+  return success();
+}
+
+LogicalResult PackOp::verify() {
+  TensorType dataTp = getData().getType(), idxTp = getIndices().getType();
+  TensorType retTp = getResult().getType();
+
+  if (!isUniqueCOOType(retTp.cast<RankedTensorType>()))
+    return emitError("must be packed into a COO tensor");
+
+  if (!retTp.hasStaticShape() || !dataTp.hasStaticShape() ||
+      !idxTp.hasStaticShape())
+    return emitError("all input types must be statically shaped");
+
+  if (dataTp.getRank() != 1 || idxTp.getRank() != 2) {
+    return emitError(
+        "requires rank 1 tensor for value and rank 2 tensor for indices");
+  }
+
+  auto enc = getSparseTensorEncoding(retTp);
+  if (idxTp.getElementType() != enc.getIndexType() ||
+      dataTp.getElementType() != retTp.getElementType())
+    return emitError("unmatched type between input and output");
+
+  auto dNOE = dataTp.getShape()[0];
+  auto iNOE = idxTp.getShape()[0];
+  if (!ShapedType::isDynamic(dNOE) && !ShapedType::isDynamic(iNOE) &&
+      dNOE != iNOE)
+    return emitError("unmatched number of elements in data and indices");
+
+  // A tensor<?xNxi32> for indices means the input COO is rank N
+  auto inRank = idxTp.getShape()[1];
+  auto ouRank = retTp.getRank();
+  if (!ShapedType::isDynamic(inRank) && inRank != ouRank)
+    return emitError("unmatched rank between input and output");
+
   return success();
 }
 
@@ -624,8 +706,8 @@ LogicalResult ToIndicesBufferOp::verify() {
 }
 
 LogicalResult ToValuesOp::verify() {
-  RankedTensorType ttp = getTensor().getType().cast<RankedTensorType>();
-  MemRefType mtp = getResult().getType().cast<MemRefType>();
+  auto ttp = getRankedTensorType(getTensor());
+  auto mtp = getMemRefType(getResult());
   if (ttp.getElementType() != mtp.getElementType())
     return emitError("unexpected mismatch in element types");
   return success();
@@ -754,7 +836,7 @@ LogicalResult UnaryOp::verify() {
 }
 
 LogicalResult ConcatenateOp::verify() {
-  auto dstTp = getType().cast<RankedTensorType>();
+  auto dstTp = getRankedTensorType(*this);
   uint64_t concatDim = getDimension().getZExtValue();
   unsigned rank = dstTp.getRank();
 
@@ -775,8 +857,7 @@ LogicalResult ConcatenateOp::verify() {
         concatDim));
 
   for (size_t i = 0, e = getInputs().size(); i < e; i++) {
-    Value input = getInputs()[i];
-    auto inputRank = input.getType().cast<RankedTensorType>().getRank();
+    const auto inputRank = getTypeRank(getInputs()[i]);
     if (inputRank != rank)
       return emitError(
           llvm::formatv("The input tensor ${0} has a different rank (rank={1}) "
@@ -785,15 +866,13 @@ LogicalResult ConcatenateOp::verify() {
   }
 
   for (unsigned i = 0; i < rank; i++) {
-    auto dstDim = dstTp.getShape()[i];
+    const auto dstDim = dstTp.getShape()[i];
     if (i == concatDim) {
       if (!ShapedType::isDynamic(dstDim)) {
+        // If we reach here, all inputs should have static shapes.
         unsigned sumDim = 0;
-        for (auto src : getInputs()) {
-          // If we reach here, all inputs should have static shapes.
-          auto d = src.getType().cast<RankedTensorType>().getShape()[i];
-          sumDim += d;
-        }
+        for (auto src : getInputs())
+          sumDim += getRankedTensorType(src).getShape()[i];
         // If all dimension are statically known, the sum of all the input
         // dimensions should be equal to the output dimension.
         if (sumDim != dstDim)
@@ -804,7 +883,7 @@ LogicalResult ConcatenateOp::verify() {
     } else {
       int64_t prev = dstDim;
       for (auto src : getInputs()) {
-        auto d = src.getType().cast<RankedTensorType>().getShape()[i];
+        const auto d = getRankedTensorType(src).getShape()[i];
         if (!ShapedType::isDynamic(prev) && d != prev)
           return emitError("All dimensions (expect for the concatenating one) "
                            "should be equal.");
@@ -817,8 +896,7 @@ LogicalResult ConcatenateOp::verify() {
 }
 
 LogicalResult InsertOp::verify() {
-  RankedTensorType ttp = getTensor().getType().cast<RankedTensorType>();
-  if (ttp.getRank() != static_cast<int64_t>(getIndices().size()))
+  if (getTypeRank(getTensor()) != static_cast<int64_t>(getIndices().size()))
     return emitOpError("incorrect number of indices");
   return success();
 }
@@ -838,8 +916,7 @@ LogicalResult PushBackOp::verify() {
 }
 
 LogicalResult CompressOp::verify() {
-  RankedTensorType ttp = getTensor().getType().cast<RankedTensorType>();
-  if (ttp.getRank() != 1 + static_cast<int64_t>(getIndices().size()))
+  if (getTypeRank(getTensor()) != 1 + static_cast<int64_t>(getIndices().size()))
     return emitOpError("incorrect number of indices");
   return success();
 }
@@ -860,7 +937,7 @@ void ForeachOp::build(
   // Builds foreach body.
   if (!bodyBuilder)
     return;
-  auto rtp = tensor.getType().cast<RankedTensorType>();
+  auto rtp = getRankedTensorType(tensor);
   int64_t rank = rtp.getRank();
 
   SmallVector<Type> blockArgTypes;
@@ -886,7 +963,7 @@ void ForeachOp::build(
 }
 
 LogicalResult ForeachOp::verify() {
-  auto t = getTensor().getType().cast<RankedTensorType>();
+  auto t = getRankedTensorType(getTensor());
   auto args = getBody()->getArguments();
 
   if (static_cast<size_t>(t.getRank()) + 1 + getInitArgs().size() !=
@@ -944,11 +1021,11 @@ LogicalResult SortOp::verify() {
 
   auto n = getN().getDefiningOp<arith::ConstantIndexOp>();
 
-  Type xtp = getXs().front().getType().cast<MemRefType>().getElementType();
+  Type xtp = getMemRefType(getXs().front()).getElementType();
   auto checkTypes = [&](ValueRange operands,
                         bool checkEleType = true) -> LogicalResult {
     for (Value opnd : operands) {
-      MemRefType mtp = opnd.getType().cast<MemRefType>();
+      auto mtp = getMemRefType(opnd);
       int64_t dim = mtp.getShape()[0];
       // We can't check the size of dynamic dimension at compile-time, but all
       // xs and ys should have a dimension not less than n at runtime.
@@ -986,7 +1063,7 @@ LogicalResult SortCooOp::verify() {
   }
 
   auto checkDim = [&](Value v, uint64_t min, const char *message) {
-    MemRefType tp = v.getType().cast<MemRefType>();
+    auto tp = getMemRefType(v);
     int64_t dim = tp.getShape()[0];
     if (!ShapedType::isDynamic(dim) && dim < (int64_t)min) {
       emitError(llvm::formatv("{0} got {1} < {2}", message, dim, min));

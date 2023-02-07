@@ -82,6 +82,10 @@ extern cl::list<std::string> ReorderData;
 extern cl::opt<bolt::ReorderFunctions::ReorderType> ReorderFunctions;
 extern cl::opt<bool> TimeBuild;
 
+cl::opt<bool> AllowStripped("allow-stripped",
+                            cl::desc("allow processing of stripped binaries"),
+                            cl::Hidden, cl::cat(BoltCategory));
+
 static cl::opt<bool> ForceToDataRelocations(
     "force-data-relocations",
     cl::desc("force relocations to data sections to always be processed"),
@@ -311,9 +315,8 @@ bool refersToReorderedSection(ErrorOr<BinarySection &> Section) {
 } // anonymous namespace
 
 Expected<std::unique_ptr<RewriteInstance>>
-RewriteInstance::createRewriteInstance(ELFObjectFileBase *File, const int Argc,
-                                       const char *const *Argv,
-                                       StringRef ToolPath) {
+RewriteInstance::create(ELFObjectFileBase *File, const int Argc,
+                        const char *const *Argv, StringRef ToolPath) {
   Error Err = Error::success();
   auto RI = std::make_unique<RewriteInstance>(File, Argc, Argv, ToolPath, Err);
   if (Err)
@@ -1663,6 +1666,12 @@ Error RewriteInstance::readSpecialSections() {
 
   BC->IsStripped = !HasSymbolTable;
 
+  if (BC->IsStripped && !opts::AllowStripped) {
+    errs() << "BOLT-ERROR: stripped binaries are not supported. If you know "
+              "what you're doing, use --allow-stripped to proceed";
+    exit(1);
+  }
+
   // Force non-relocation mode for heatmap generation
   if (opts::HeatmapMode)
     BC->HasRelocations = false;
@@ -1670,10 +1679,6 @@ Error RewriteInstance::readSpecialSections() {
   if (BC->HasRelocations)
     outs() << "BOLT-INFO: enabling " << (opts::StrictMode ? "strict " : "")
            << "relocation mode\n";
-
-  if (BC->IsStripped)
-    outs() << "BOLT-INFO: input binary is stripped. The support is limited and "
-           << "is considered experimental.\n";
 
   // Read EH frame for function boundaries info.
   Expected<const DWARFDebugFrame *> EHFrameOrError = BC->DwCtx->getEHFrame();
@@ -2756,10 +2761,14 @@ void RewriteInstance::selectFunctionsToProcess() {
       LiteThresholdExecCount, static_cast<uint64_t>(opts::LiteThresholdCount));
 
   StringSet<> ReorderFunctionsUserSet;
+  StringSet<> ReorderFunctionsLTOCommonSet;
   if (opts::ReorderFunctions == ReorderFunctions::RT_USER) {
     for (const std::string &Function :
-         ReorderFunctions::readFunctionOrderFile())
+         ReorderFunctions::readFunctionOrderFile()) {
       ReorderFunctionsUserSet.insert(Function);
+      if (std::optional<StringRef> LTOCommonName = getLTOCommonName(Function))
+        ReorderFunctionsLTOCommonSet.insert(*LTOCommonName);
+    }
   }
 
   uint64_t NumFunctionsToProcess = 0;
@@ -2795,6 +2804,10 @@ void RewriteInstance::selectFunctionsToProcess() {
             });
         if (Match.has_value())
           return true;
+        for (const StringRef Name : Function.getNames())
+          if (std::optional<StringRef> LTOCommonName = getLTOCommonName(Name))
+            if (ReorderFunctionsLTOCommonSet.contains(*LTOCommonName))
+              return true;
       }
 
       if (ProfileReader && !ProfileReader->mayHaveProfileData(Function))
@@ -4442,8 +4455,7 @@ RewriteInstance::getOutputSections(ELFObjectFile<ELFT> *File,
   }
 
   std::vector<ELFShdrTy> SectionsOnly(OutputSections.size());
-  llvm::transform(OutputSections, SectionsOnly.begin(),
-                  [](auto &SectionInfo) { return SectionInfo.second; });
+  llvm::copy(llvm::make_second_range(OutputSections), SectionsOnly.begin());
 
   return SectionsOnly;
 }
