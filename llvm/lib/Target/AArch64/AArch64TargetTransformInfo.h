@@ -65,8 +65,8 @@ class AArch64TTIImpl : public BasicTTIImplBase<AArch64TTIImpl> {
   // 'Val' and 'Index' are forwarded from 'getVectorInstrCost'; 'HasRealUse'
   // indicates whether the vector instruction is available in the input IR or
   // just imaginary in vectorizer passes.
-  InstructionCost getVectorInstrCostHelper(Type *Val, unsigned Index,
-                                           bool HasRealUse);
+  InstructionCost getVectorInstrCostHelper(const Instruction *I, Type *Val,
+                                           unsigned Index, bool HasRealUse);
 
 public:
   explicit AArch64TTIImpl(const AArch64TargetMachine *TM, const Function &F)
@@ -144,7 +144,7 @@ public:
     return VF.getKnownMinValue() * ST->getVScaleForTuning();
   }
 
-  unsigned getMaxInterleaveFactor(unsigned VF);
+  unsigned getMaxInterleaveFactor(ElementCount VF);
 
   bool prefersVectorizedAddressing() const;
 
@@ -349,7 +349,7 @@ public:
 
   TailFoldingStyle getPreferredTailFoldingStyle() const {
     if (ST->hasSVE())
-      return TailFoldingStyle::DataAndControlFlow;
+      return TailFoldingStyle::DataAndControlFlowWithoutRuntimeCheck;
     return TailFoldingStyle::DataWithoutLaneMask;
   }
 

@@ -15,7 +15,8 @@
 #include "src/__support/FPUtil/multiply_add.h"
 #include "src/__support/FPUtil/nearest_integer.h"
 #include "src/__support/common.h"
-#include "src/__support/macros/cpu_features.h"
+#include "src/__support/macros/optimization.h"            // LIBC_UNLIKELY
+#include "src/__support/macros/properties/cpu_features.h" // LIBC_TARGET_CPU_HAS_FMA
 
 #include <errno.h>
 
@@ -74,11 +75,11 @@ LLVM_LIBC_FUNCTION(float, tanf, (float x)) {
       // |x| < 2^-125. For targets without FMA instructions, we simply use
       // double for intermediate results as it is more efficient than using an
       // emulated version of FMA.
-#if defined(LIBC_TARGET_HAS_FMA)
+#if defined(LIBC_TARGET_CPU_HAS_FMA)
       return fputil::multiply_add(x, 0x1.0p-25f, x);
 #else
       return static_cast<float>(fputil::multiply_add(xd, 0x1.0p-25, xd));
-#endif // LIBC_TARGET_HAS_FMA
+#endif // LIBC_TARGET_CPU_HAS_FMA
     }
 
     // |x| < pi/32
@@ -110,8 +111,8 @@ LLVM_LIBC_FUNCTION(float, tanf, (float x)) {
     // Inf or NaN
     if (LIBC_UNLIKELY(x_abs >= 0x7f80'0000U)) {
       if (x_abs == 0x7f80'0000U) {
-        errno = EDOM;
-        fputil::set_except(FE_INVALID);
+        fputil::set_errno_if_required(EDOM);
+        fputil::raise_except_if_required(FE_INVALID);
       }
       return x +
              FPBits::build_nan(1 << (fputil::MantissaWidth<float>::VALUE - 1));

@@ -16,7 +16,8 @@
 #include "src/__support/FPUtil/multiply_add.h"
 #include "src/__support/FPUtil/nearest_integer.h"
 #include "src/__support/common.h"
-#include "src/__support/macros/cpu_features.h"
+#include "src/__support/macros/optimization.h"            // LIBC_UNLIKELY
+#include "src/__support/macros/properties/cpu_features.h" // LIBC_TARGET_CPU_HAS_FMA
 
 #include <errno.h>
 
@@ -37,14 +38,14 @@ LLVM_LIBC_FUNCTION(float, expm1f, (float x)) {
     return 0x1.8dbe62p-3f;
   }
 
-#if !defined(LIBC_TARGET_HAS_FMA)
+#if !defined(LIBC_TARGET_CPU_HAS_FMA)
   if (LIBC_UNLIKELY(x_u == 0xbdc1'c6cbU)) { // x = -0x1.838d96p-4f
     int round_mode = fputil::get_round();
     if (round_mode == FE_TONEAREST || round_mode == FE_DOWNWARD)
       return -0x1.71c884p-4f;
     return -0x1.71c882p-4f;
   }
-#endif // LIBC_TARGET_HAS_FMA
+#endif // LIBC_TARGET_CPU_HAS_FMA
 
   // When |x| > 25*log(2), or nan
   if (LIBC_UNLIKELY(x_abs >= 0x418a'a123U)) {
@@ -68,7 +69,8 @@ LLVM_LIBC_FUNCTION(float, expm1f, (float x)) {
           if (rounding == FE_DOWNWARD || rounding == FE_TOWARDZERO)
             return static_cast<float>(FPBits(FPBits::MAX_NORMAL));
 
-          errno = ERANGE;
+          fputil::set_errno_if_required(ERANGE);
+          fputil::raise_except_if_required(FE_OVERFLOW);
         }
         return x + static_cast<float>(FPBits::inf());
       }
@@ -100,12 +102,12 @@ LLVM_LIBC_FUNCTION(float, expm1f, (float x)) {
         // 2^-76. For targets without FMA instructions, we simply use double for
         // intermediate results as it is more efficient than using an emulated
         // version of FMA.
-#if defined(LIBC_TARGET_HAS_FMA)
+#if defined(LIBC_TARGET_CPU_HAS_FMA)
       return fputil::fma(x, x, x);
 #else
       double xd = x;
       return static_cast<float>(fputil::multiply_add(xd, xd, xd));
-#endif // LIBC_TARGET_HAS_FMA
+#endif // LIBC_TARGET_CPU_HAS_FMA
     }
 
     // 2^-25 <= |x| < 2^-4

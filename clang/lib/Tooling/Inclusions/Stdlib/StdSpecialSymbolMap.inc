@@ -22,6 +22,20 @@ SYMBOL(size_t, std::, <cwchar>)
 SYMBOL(size_t, std::, <cuchar>)
 SYMBOL(size_t, std::, <ctime>)
 SYMBOL(size_t, std::, <cstdio>)
+SYMBOL(size_t, None, <cstddef>)
+SYMBOL(size_t, None, <cstdlib>)
+SYMBOL(size_t, None, <cstring>)
+SYMBOL(size_t, None, <cwchar>)
+SYMBOL(size_t, None, <cuchar>)
+SYMBOL(size_t, None, <ctime>)
+SYMBOL(size_t, None, <cstdio>)
+SYMBOL(size_t, None, <stddef.h>)
+SYMBOL(size_t, None, <stdlib.h>)
+SYMBOL(size_t, None, <string.h>)
+SYMBOL(size_t, None, <wchar.h>)
+SYMBOL(size_t, None, <uchar.h>)
+SYMBOL(size_t, None, <time.h>)
+SYMBOL(size_t, None, <stdio.h>)
 SYMBOL(unwrap_ref_decay, std::, <type_traits>)
 SYMBOL(unwrap_ref_decay, std::, <functional>)
 SYMBOL(unwrap_reference, std::, <type_traits>)
@@ -30,6 +44,22 @@ SYMBOL(unwrap_ref_decay_t, std::, <type_traits>)
 SYMBOL(unwrap_ref_decay_t, std::, <functional>)
 SYMBOL(wint_t, std::, <cwctype>)
 SYMBOL(wint_t, std::, <cwchar>)
+SYMBOL(swap, std::, <utility>)
+SYMBOL(swap, std::, <algorithm>) // until C++11
+// C++ [string.view.synop 23.3.2]: The function templates defined in
+// [utility.swap] ... are available when <string_­view> is included.
+SYMBOL(swap, std::, <string_view>) // since C++17
+// C++ [tuple.helper 22.4.7]: In addition to being available via inclusion of
+// the <tuple> header, ... any of the headers <array>, <ranges>, or <utility>
+// are included.
+SYMBOL(tuple_size, std::, <tuple>)
+SYMBOL(tuple_size, std::, <array>)
+SYMBOL(tuple_size, std::, <ranges>)
+SYMBOL(tuple_size, std::, <utility>)
+SYMBOL(tuple_element, std::, <tuple>)
+SYMBOL(tuple_element, std::, <array>)
+SYMBOL(tuple_element, std::, <ranges>)
+SYMBOL(tuple_element, std::, <utility>)
 // C++ [iterator.range 25.7]: In addition to being available via inclusion of
 // the <iterator> header, the function templates in [iterator.range] are
 // available when any of the following headers are included: <array>, <deque>,
@@ -202,3 +232,33 @@ SYMBOL(ssize, std::, <string_view>)
 SYMBOL(ssize, std::, <unordered_map>)
 SYMBOL(ssize, std::, <unordered_set>)
 SYMBOL(ssize, std::, <vector>)
+
+// Add headers for generic integer-type abs.
+// Ignore other variants (std::complex, std::valarray, std::intmax_t)
+SYMBOL(abs, std::, <cstdlib>)
+SYMBOL(abs, std::, <cmath>)
+SYMBOL(abs, None, <cstdlib>)
+SYMBOL(abs, None, <stdlib.h>)
+SYMBOL(abs, None, <cmath>)
+SYMBOL(abs, None, <math.h>)
+
+// std::get has a few variants for different types (tuple, array, pair etc)
+// which is tricky to disambiguate without type information.
+// Don't set any header for it, as it comes with the type header.
+SYMBOL(get, std::, /*no headers*/)
+
+// Macros
+SYMBOL(NULL, None, <cstddef>)
+SYMBOL(NULL, None, <stddef.h>)
+SYMBOL(NULL, None, <cstdlib>)
+SYMBOL(NULL, None, <stdlib.h>)
+SYMBOL(NULL, None, <cstring>)
+SYMBOL(NULL, None, <string.h>)
+SYMBOL(NULL, None, <cwchar>)
+SYMBOL(NULL, None, <wchar.h>)
+SYMBOL(NULL, None, <ctime>)
+SYMBOL(NULL, None, <time.h>)
+SYMBOL(NULL, None, <clocale>)
+SYMBOL(NULL, None, <locale.h>)
+SYMBOL(NULL, None, <cstdio>)
+SYMBOL(NULL, None, <stdio.h>)

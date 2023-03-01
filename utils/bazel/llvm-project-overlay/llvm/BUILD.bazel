@@ -204,6 +204,7 @@ cc_library(
         "lib/Support/BLAKE3/blake3.c",
         "lib/Support/BLAKE3/blake3_dispatch.c",
         "lib/Support/BLAKE3/blake3_portable.c",
+        "lib/Support/BLAKE3/llvm_blake3_prefix.h",
     ] + select({
         "@platforms//cpu:aarch64": [
             "lib/Support/BLAKE3/blake3_neon.c",
@@ -437,6 +438,7 @@ cc_library(
         ":DebugInfoCodeView",
         ":DebugInfoDWARF",
         ":DebugInfoPDB",
+        ":Demangle",
         ":MC",
         ":MCDisassembler",
         ":Object",
@@ -522,6 +524,7 @@ cc_library(
         ":MC",
         ":Object",
         ":Support",
+        ":TargetParser",
     ],
 )
 
@@ -960,6 +963,7 @@ cc_library(
         ":MC",
         ":Object",
         ":Support",
+        ":TargetParser",
     ],
 )
 
@@ -1082,6 +1086,7 @@ cc_library(
         ":Core",
         ":MC",
         ":Support",
+        ":TargetParser",
         ":config",
     ],
 )
@@ -2511,6 +2516,7 @@ cc_library(
         ":OrcShared",
         ":OrcTargetProcess",
         ":Support",
+        ":TargetParser",
         ":config",
     ],
 )
@@ -2635,6 +2641,7 @@ cc_library(
         ":Passes",
         ":Support",
         ":Target",
+        ":TargetParser",
         ":config",
     ],
 )
@@ -2680,6 +2687,7 @@ cc_library(
         ":Object",
         ":Option",
         ":Support",
+        ":TargetParser",
     ],
 )
 
@@ -2755,11 +2763,6 @@ cc_library(
         "include/llvm/WindowsManifest/*.h",
     ]),
     copts = llvm_copts,
-    linkopts = [
-        # Libxml2 is required to process Windows manifests. Without this,
-        # lld uses Microsoft mt.exe instead, which is not cross-platform.
-        "-lxml2",
-    ],
     deps = [
         ":Support",
         ":config",
@@ -3360,6 +3363,7 @@ cc_binary(
         ":Option",
         ":Support",
         ":Target",
+        ":TargetParser",
     ],
 )
 
@@ -3395,6 +3399,7 @@ cc_binary(
         ":MCParser",
         ":Object",
         ":Support",
+        ":TargetParser",
         ":config",
     ],
 )
@@ -3522,6 +3527,7 @@ cc_binary(
         ":OrcShared",
         ":OrcTargetProcess",
         ":Support",
+        ":TargetParser",
         ":config",
     ],
 )
@@ -3694,6 +3700,7 @@ cc_binary(
         ":MCA",
         ":MCParser",
         ":Support",
+        ":TargetParser",
         ":llvm-mca-headers",
     ],
 )
@@ -3929,6 +3936,7 @@ cc_binary(
         ":Option",
         ":Support",
         ":Target",
+        ":TargetParser",
         ":llvm-bitcode-strip-opts",
         ":llvm-installnametool-opts",
         ":llvm-objcopy-opts",
@@ -4232,6 +4240,7 @@ cc_binary(
         ":Passes",
         ":Support",
         ":Target",
+        ":TargetParser",
         ":TransformUtils",
     ],
 )
@@ -4636,6 +4645,7 @@ cc_binary(
         ":Passes",
         ":Scalar",
         ":Support",
+        ":TargetParser",
         ":TransformUtils",
         ":common_transforms",
         ":config",
