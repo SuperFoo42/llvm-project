@@ -27,7 +27,6 @@
 #include "clang/AST/DeclTemplate.h"
 #include "clang/AST/DeclVisitor.h"
 #include "clang/AST/DeclarationName.h"
-#include "clang/AST/Designator.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/ExprObjC.h"
@@ -436,6 +435,8 @@ namespace clang {
 
     Expected<CXXCastPath> ImportCastPath(CastExpr *E);
     Expected<APValue> ImportAPValue(const APValue &FromValue);
+
+    using Designator = DesignatedInitExpr::Designator;
 
     /// What we should import from the definition.
     enum ImportDefinitionKind {
@@ -961,7 +962,9 @@ Expected<DeclGroupRef> ASTNodeImporter::import(const DeclGroupRef &DG) {
                               NumDecls);
 }
 
-template <> Expected<Designator> ASTNodeImporter::import(const Designator &D) {
+template <>
+Expected<ASTNodeImporter::Designator>
+ASTNodeImporter::import(const Designator &D) {
   if (D.isFieldDesignator()) {
     IdentifierInfo *ToFieldName = Importer.Import(D.getFieldName());
 
@@ -973,8 +976,7 @@ template <> Expected<Designator> ASTNodeImporter::import(const Designator &D) {
     if (!ToFieldLocOrErr)
       return ToFieldLocOrErr.takeError();
 
-    return Designator::CreateFieldDesignator(ToFieldName, *ToDotLocOrErr,
-                                             *ToFieldLocOrErr);
+    return Designator(ToFieldName, *ToDotLocOrErr, *ToFieldLocOrErr);
   }
 
   ExpectedSLoc ToLBracketLocOrErr = import(D.getLBracketLoc());
@@ -986,15 +988,15 @@ template <> Expected<Designator> ASTNodeImporter::import(const Designator &D) {
     return ToRBracketLocOrErr.takeError();
 
   if (D.isArrayDesignator())
-    return Designator::CreateArrayDesignator(
-        D.getFirstExprIndex(), *ToLBracketLocOrErr, *ToRBracketLocOrErr);
+    return Designator(D.getFirstExprIndex(),
+                      *ToLBracketLocOrErr, *ToRBracketLocOrErr);
 
   ExpectedSLoc ToEllipsisLocOrErr = import(D.getEllipsisLoc());
   if (!ToEllipsisLocOrErr)
     return ToEllipsisLocOrErr.takeError();
 
   assert(D.isArrayRangeDesignator());
-  return Designator::CreateArrayRangeDesignator(
+  return Designator(
       D.getFirstExprIndex(), *ToLBracketLocOrErr, *ToEllipsisLocOrErr,
       *ToRBracketLocOrErr);
 }
@@ -3893,6 +3895,12 @@ ExpectedDecl ASTNodeImporter::VisitFieldDecl(FieldDecl *D) {
                               D->getInClassInitStyle()))
     return ToField;
 
+  // We need [[no_unqiue_address]] attributes to be added to FieldDecl, before
+  // we add fields in CXXRecordDecl::addedMember, otherwise record will be
+  // marked as having non-zero size.
+  Err = Importer.ImportAttrs(ToField, D);
+  if (Err)
+    return std::move(Err);
   ToField->setAccess(D->getAccess());
   ToField->setLexicalDeclContext(LexicalDC);
   if (ToInitializer)
@@ -8979,6 +8987,19 @@ TranslationUnitDecl *ASTImporter::GetFromTU(Decl *ToD) {
   return FromDPos->second->getTranslationUnitDecl();
 }
 
+Error ASTImporter::ImportAttrs(Decl *ToD, Decl *FromD) {
+  if (!FromD->hasAttrs() || ToD->hasAttrs())
+    return Error::success();
+  for (const Attr *FromAttr : FromD->getAttrs()) {
+    auto ToAttrOrErr = Import(FromAttr);
+    if (ToAttrOrErr)
+      ToD->addAttr(*ToAttrOrErr);
+    else
+      return ToAttrOrErr.takeError();
+  }
+  return Error::success();
+}
+
 Expected<Decl *> ASTImporter::Import(Decl *FromD) {
   if (!FromD)
     return nullptr;
@@ -9113,15 +9134,8 @@ Expected<Decl *> ASTImporter::Import(Decl *FromD) {
 
   // Make sure that ImportImpl registered the imported decl.
   assert(ImportedDecls.count(FromD) != 0 && "Missing call to MapImported?");
-
-  if (FromD->hasAttrs())
-    for (const Attr *FromAttr : FromD->getAttrs()) {
-      auto ToAttrOrErr = Import(FromAttr);
-      if (ToAttrOrErr)
-        ToD->addAttr(*ToAttrOrErr);
-      else
-        return ToAttrOrErr.takeError();
-    }
+  if (auto Error = ImportAttrs(ToD, FromD))
+    return std::move(Error);
 
   // Notify subclasses.
   Imported(FromD, ToD);
@@ -9383,7 +9397,7 @@ Expected<TemplateName> ASTImporter::Import(TemplateName From) {
   switch (From.getKind()) {
   case TemplateName::Template:
     if (ExpectedDecl ToTemplateOrErr = Import(From.getAsTemplateDecl()))
-      return TemplateName(cast<TemplateDecl>(*ToTemplateOrErr));
+      return TemplateName(cast<TemplateDecl>((*ToTemplateOrErr)->getCanonicalDecl()));
     else
       return ToTemplateOrErr.takeError();
 

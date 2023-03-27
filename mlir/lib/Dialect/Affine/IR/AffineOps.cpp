@@ -1709,6 +1709,17 @@ LogicalResult AffineDmaStartOp::fold(ArrayRef<Attribute> cstOperands,
   return memref::foldMemRefCast(*this);
 }
 
+void AffineDmaStartOp::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
+        &effects) {
+  effects.emplace_back(MemoryEffects::Read::get(), getSrcMemRef(),
+                       SideEffects::DefaultResource::get());
+  effects.emplace_back(MemoryEffects::Write::get(), getDstMemRef(),
+                       SideEffects::DefaultResource::get());
+  effects.emplace_back(MemoryEffects::Read::get(), getTagMemRef(),
+                       SideEffects::DefaultResource::get());
+}
+
 //===----------------------------------------------------------------------===//
 // AffineDmaWaitOp
 //===----------------------------------------------------------------------===//
@@ -1785,6 +1796,13 @@ LogicalResult AffineDmaWaitOp::fold(ArrayRef<Attribute> cstOperands,
                                     SmallVectorImpl<OpFoldResult> &results) {
   /// dma_wait(memrefcast) -> dma_wait
   return memref::foldMemRefCast(*this);
+}
+
+void AffineDmaWaitOp::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
+        &effects) {
+  effects.emplace_back(MemoryEffects::Read::get(), getTagMemRef(),
+                       SideEffects::DefaultResource::get());
 }
 
 //===----------------------------------------------------------------------===//
@@ -2505,8 +2523,14 @@ bool mlir::isAffineForInductionVar(Value val) {
   return getForInductionVarOwner(val) != AffineForOp();
 }
 
-/// Returns the loop parent of an induction variable. If the provided value is
-/// not an induction variable, then return nullptr.
+bool mlir::isAffineParallelInductionVar(Value val) {
+  return getAffineParallelInductionVarOwner(val) != nullptr;
+}
+
+bool mlir::isAffineInductionVar(Value val) {
+  return isAffineForInductionVar(val) || isAffineParallelInductionVar(val);
+}
+
 AffineForOp mlir::getForInductionVarOwner(Value val) {
   auto ivArg = val.dyn_cast<BlockArgument>();
   if (!ivArg || !ivArg.getOwner())
@@ -2516,6 +2540,17 @@ AffineForOp mlir::getForInductionVarOwner(Value val) {
     // Check to make sure `val` is the induction variable, not an iter_arg.
     return forOp.getInductionVar() == val ? forOp : AffineForOp();
   return AffineForOp();
+}
+
+AffineParallelOp mlir::getAffineParallelInductionVarOwner(Value val) {
+  auto ivArg = val.dyn_cast<BlockArgument>();
+  if (!ivArg || !ivArg.getOwner())
+    return nullptr;
+  Operation *containingOp = ivArg.getOwner()->getParentOp();
+  auto parallelOp = dyn_cast<AffineParallelOp>(containingOp);
+  if (parallelOp && llvm::is_contained(parallelOp.getIVs(), val))
+    return parallelOp;
+  return nullptr;
 }
 
 /// Extracts the induction variables from a list of AffineForOps and returns
@@ -2725,7 +2760,7 @@ struct AlwaysTrueOrFalseIf : public OpRewritePattern<AffineIfOp> {
     Operation *blockToMoveTerminator = blockToMove->getTerminator();
     // Promote the "blockToMove" block to the parent operation block between the
     // prologue and epilogue of "op".
-    rewriter.mergeBlockBefore(blockToMove, op);
+    rewriter.inlineBlockBefore(blockToMove, op);
     // Replace the "op" operation with the operands of the
     // "blockToMoveTerminator" operation. Note that "blockToMoveTerminator" is
     // the affine.yield operation present in the "blockToMove" block. It has no

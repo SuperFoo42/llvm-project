@@ -131,6 +131,8 @@ public:
     return ST->getVScaleForTuning();
   }
 
+  bool isVScaleKnownToBeAPowerOfTwo() const { return true; }
+
   bool shouldMaximizeVectorBandwidth(TargetTransformInfo::RegisterKind K) const;
 
   /// Try to return an estimate cost factor that can be used as a multiplier
@@ -347,9 +349,12 @@ public:
     return ST->hasSVE() ? 5 : 0;
   }
 
-  TailFoldingStyle getPreferredTailFoldingStyle() const {
+  TailFoldingStyle getPreferredTailFoldingStyle(bool IVUpdateMayOverflow) const {
     if (ST->hasSVE())
-      return TailFoldingStyle::DataAndControlFlowWithoutRuntimeCheck;
+      return IVUpdateMayOverflow
+                 ? TailFoldingStyle::DataAndControlFlowWithoutRuntimeCheck
+                 : TailFoldingStyle::DataAndControlFlow;
+
     return TailFoldingStyle::DataWithoutLaneMask;
   }
 

@@ -107,10 +107,7 @@ define <8 x i16> @abdu_undef(<8 x i16> %src1) {
 define <8 x i16> @abdu_ugt(<8 x i16>, <8 x i16>) {
 ; CHECK-LABEL: abdu_ugt:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    cmhi v2.8h, v0.8h, v1.8h
-; CHECK-NEXT:    sub v3.8h, v0.8h, v1.8h
-; CHECK-NEXT:    sub v0.8h, v1.8h, v0.8h
-; CHECK-NEXT:    bit v0.16b, v3.16b, v2.16b
+; CHECK-NEXT:    uabd v0.8h, v0.8h, v1.8h
 ; CHECK-NEXT:    ret
   %3 = icmp ugt <8 x i16> %0, %1
   %4 = sub <8 x i16> %0, %1
@@ -122,10 +119,7 @@ define <8 x i16> @abdu_ugt(<8 x i16>, <8 x i16>) {
 define <8 x i16> @abdu_uge(<8 x i16>, <8 x i16>) {
 ; CHECK-LABEL: abdu_uge:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    cmhs v2.8h, v0.8h, v1.8h
-; CHECK-NEXT:    sub v3.8h, v0.8h, v1.8h
-; CHECK-NEXT:    sub v0.8h, v1.8h, v0.8h
-; CHECK-NEXT:    bit v0.16b, v3.16b, v2.16b
+; CHECK-NEXT:    uabd v0.8h, v0.8h, v1.8h
 ; CHECK-NEXT:    ret
   %3 = icmp uge <8 x i16> %0, %1
   %4 = sub <8 x i16> %0, %1
@@ -137,10 +131,7 @@ define <8 x i16> @abdu_uge(<8 x i16>, <8 x i16>) {
 define <8 x i16> @abdu_ult(<8 x i16>, <8 x i16>) {
 ; CHECK-LABEL: abdu_ult:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    cmhi v2.8h, v1.8h, v0.8h
-; CHECK-NEXT:    sub v3.8h, v0.8h, v1.8h
-; CHECK-NEXT:    sub v0.8h, v1.8h, v0.8h
-; CHECK-NEXT:    bif v0.16b, v3.16b, v2.16b
+; CHECK-NEXT:    uabd v0.8h, v0.8h, v1.8h
 ; CHECK-NEXT:    ret
   %3 = icmp ult <8 x i16> %0, %1
   %4 = sub <8 x i16> %0, %1
@@ -152,10 +143,7 @@ define <8 x i16> @abdu_ult(<8 x i16>, <8 x i16>) {
 define <8 x i16> @abdu_ule(<8 x i16>, <8 x i16>) {
 ; CHECK-LABEL: abdu_ule:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    cmhs v2.8h, v1.8h, v0.8h
-; CHECK-NEXT:    sub v3.8h, v0.8h, v1.8h
-; CHECK-NEXT:    sub v0.8h, v1.8h, v0.8h
-; CHECK-NEXT:    bif v0.16b, v3.16b, v2.16b
+; CHECK-NEXT:    uabd v0.8h, v0.8h, v1.8h
 ; CHECK-NEXT:    ret
   %3 = icmp ule <8 x i16> %0, %1
   %4 = sub <8 x i16> %0, %1
@@ -167,10 +155,7 @@ define <8 x i16> @abdu_ule(<8 x i16>, <8 x i16>) {
 define <8 x i16> @abds_sgt(<8 x i16>, <8 x i16>) {
 ; CHECK-LABEL: abds_sgt:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    cmgt v2.8h, v0.8h, v1.8h
-; CHECK-NEXT:    sub v3.8h, v0.8h, v1.8h
-; CHECK-NEXT:    sub v0.8h, v1.8h, v0.8h
-; CHECK-NEXT:    bit v0.16b, v3.16b, v2.16b
+; CHECK-NEXT:    sabd v0.8h, v0.8h, v1.8h
 ; CHECK-NEXT:    ret
   %3 = icmp sgt <8 x i16> %0, %1
   %4 = sub <8 x i16> %0, %1
@@ -182,10 +167,7 @@ define <8 x i16> @abds_sgt(<8 x i16>, <8 x i16>) {
 define <8 x i16> @abds_sge(<8 x i16>, <8 x i16>) {
 ; CHECK-LABEL: abds_sge:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    cmge v2.8h, v0.8h, v1.8h
-; CHECK-NEXT:    sub v3.8h, v0.8h, v1.8h
-; CHECK-NEXT:    sub v0.8h, v1.8h, v0.8h
-; CHECK-NEXT:    bit v0.16b, v3.16b, v2.16b
+; CHECK-NEXT:    sabd v0.8h, v0.8h, v1.8h
 ; CHECK-NEXT:    ret
   %3 = icmp sge <8 x i16> %0, %1
   %4 = sub <8 x i16> %0, %1
@@ -197,10 +179,7 @@ define <8 x i16> @abds_sge(<8 x i16>, <8 x i16>) {
 define <8 x i16> @abds_slt(<8 x i16>, <8 x i16>) {
 ; CHECK-LABEL: abds_slt:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    cmgt v2.8h, v1.8h, v0.8h
-; CHECK-NEXT:    sub v3.8h, v0.8h, v1.8h
-; CHECK-NEXT:    sub v0.8h, v1.8h, v0.8h
-; CHECK-NEXT:    bif v0.16b, v3.16b, v2.16b
+; CHECK-NEXT:    sabd v0.8h, v0.8h, v1.8h
 ; CHECK-NEXT:    ret
   %3 = icmp slt <8 x i16> %0, %1
   %4 = sub <8 x i16> %0, %1
@@ -212,10 +191,7 @@ define <8 x i16> @abds_slt(<8 x i16>, <8 x i16>) {
 define <8 x i16> @abds_sle(<8 x i16>, <8 x i16>) {
 ; CHECK-LABEL: abds_sle:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    cmge v2.8h, v1.8h, v0.8h
-; CHECK-NEXT:    sub v3.8h, v0.8h, v1.8h
-; CHECK-NEXT:    sub v0.8h, v1.8h, v0.8h
-; CHECK-NEXT:    bif v0.16b, v3.16b, v2.16b
+; CHECK-NEXT:    sabd v0.8h, v0.8h, v1.8h
 ; CHECK-NEXT:    ret
   %3 = icmp sle <8 x i16> %0, %1
   %4 = sub <8 x i16> %0, %1
@@ -321,8 +297,10 @@ define <8 x i16> @abdu_i_undef(<8 x i16> %t, <8 x i16> %src1) {
 define <8 x i16> @abdu_i_reassoc(<8 x i16> %src1) {
 ; CHECK-LABEL: abdu_i_reassoc:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    movi v1.8h, #2
+; CHECK-NEXT:    movi v1.8h, #3
+; CHECK-NEXT:    movi v2.8h, #1
 ; CHECK-NEXT:    uabd v0.8h, v0.8h, v1.8h
+; CHECK-NEXT:    uabd v0.8h, v0.8h, v2.8h
 ; CHECK-NEXT:    ret
   %r1 = call <8 x i16> @llvm.aarch64.neon.uabd.v8i16(<8 x i16> %src1, <8 x i16> <i16 3, i16 3, i16 3, i16 3, i16 3, i16 3, i16 3, i16 3>)
   %result = call <8 x i16> @llvm.aarch64.neon.uabd.v8i16(<8 x i16> %r1, <8 x i16> <i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1>)
@@ -539,8 +517,10 @@ define <8 x i16> @abds_i_undef(<8 x i16> %t, <8 x i16> %src1) {
 define <8 x i16> @abds_i_reassoc(<8 x i16> %src1) {
 ; CHECK-LABEL: abds_i_reassoc:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    movi v1.8h, #2
+; CHECK-NEXT:    movi v1.8h, #3
+; CHECK-NEXT:    movi v2.8h, #1
 ; CHECK-NEXT:    sabd v0.8h, v0.8h, v1.8h
+; CHECK-NEXT:    sabd v0.8h, v0.8h, v2.8h
 ; CHECK-NEXT:    ret
   %r1 = call <8 x i16> @llvm.aarch64.neon.sabd.v8i16(<8 x i16> %src1, <8 x i16> <i16 3, i16 3, i16 3, i16 3, i16 3, i16 3, i16 3, i16 3>)
   %result = call <8 x i16> @llvm.aarch64.neon.sabd.v8i16(<8 x i16> %r1, <8 x i16> <i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1>)

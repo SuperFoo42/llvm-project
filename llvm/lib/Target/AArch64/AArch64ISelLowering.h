@@ -917,7 +917,7 @@ public:
                               SDValue Chain, SDValue InFlag,
                               SDValue PStateSM, bool Entry) const;
 
-  bool isVScaleKnownToBeAPowerOfTwo() const override;
+  bool isVScaleKnownToBeAPowerOfTwo() const override { return true; }
 
   // Normally SVE is only used for byte size vectors that do not fit within a
   // NEON vector. This changes when OverrideNEON is true, allowing SVE to be
@@ -932,8 +932,7 @@ private:
   bool isExtFreeImpl(const Instruction *Ext) const override;
 
   void addTypeForNEON(MVT VT);
-  void addTypeForStreamingSVE(MVT VT);
-  void addTypeForFixedLengthSVE(MVT VT);
+  void addTypeForFixedLengthSVE(MVT VT, bool StreamingSVE);
   void addDRTypeForNEON(MVT VT);
   void addQRTypeForNEON(MVT VT);
 
@@ -1091,6 +1090,7 @@ private:
   SDValue LowerWindowsDYNAMIC_STACKALLOC(SDValue Op, SDValue Chain,
                                          SDValue &Size,
                                          SelectionDAG &DAG) const;
+  SDValue LowerAVG(SDValue Op, SelectionDAG &DAG, unsigned NewOp) const;
 
   SDValue LowerFixedLengthVectorIntDivideToSVE(SDValue Op,
                                                SelectionDAG &DAG) const;

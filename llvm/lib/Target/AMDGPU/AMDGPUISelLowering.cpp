@@ -912,10 +912,6 @@ bool AMDGPUTargetLowering::isZExtFree(EVT Src, EVT Dest) const {
   return Src == MVT::i32 && Dest == MVT::i64;
 }
 
-bool AMDGPUTargetLowering::isZExtFree(SDValue Val, EVT VT2) const {
-  return isZExtFree(Val.getValueType(), VT2);
-}
-
 bool AMDGPUTargetLowering::isNarrowingProfitable(EVT SrcVT, EVT DestVT) const {
   // There aren't really 64-bit registers, but pairs of 32-bit ones and only a
   // limited number of native 64-bit operations. Shrinking an operation to fit
@@ -1329,15 +1325,10 @@ SDValue AMDGPUTargetLowering::LowerGlobalAddress(AMDGPUMachineFunction* MFI,
   GlobalAddressSDNode *G = cast<GlobalAddressSDNode>(Op);
   const GlobalValue *GV = G->getGlobal();
 
-  if (G->getAddressSpace() == AMDGPUAS::LOCAL_ADDRESS) {
-    if (!MFI->isModuleEntryFunction()) {
-      if (const GlobalVariable *GVar = dyn_cast<GlobalVariable>(GV)) {
-        if (AMDGPUMachineFunction::isKnownAddressLDSGlobal(*GVar)) {
-          unsigned Offset =
-              AMDGPUMachineFunction::calculateKnownAddressOfLDSGlobal(*GVar);
-          return DAG.getConstant(Offset, SDLoc(Op), Op.getValueType());
-        }
-      }
+  if (!MFI->isModuleEntryFunction()) {
+    if (std::optional<uint32_t> Address =
+            AMDGPUMachineFunction::getLDSAbsoluteAddress(*GV)) {
+      return DAG.getConstant(*Address, SDLoc(Op), Op.getValueType());
     }
   }
 
@@ -3661,12 +3652,6 @@ SDValue AMDGPUTargetLowering::performMulhuCombine(SDNode *N,
   return DAG.getZExtOrTrunc(Mulhi, DL, VT);
 }
 
-static bool isNegativeOne(SDValue Val) {
-  if (ConstantSDNode *C = dyn_cast<ConstantSDNode>(Val))
-    return C->isAllOnes();
-  return false;
-}
-
 SDValue AMDGPUTargetLowering::getFFBX_U32(SelectionDAG &DAG,
                                           SDValue Op,
                                           const SDLoc &DL,
@@ -3709,7 +3694,7 @@ SDValue AMDGPUTargetLowering::performCtlz_CttzCombine(const SDLoc &SL, SDValue C
   // select (setcc x, 0, eq), -1, (cttz_zero_undef x) -> ffbl_u32 x
   if (CCOpcode == ISD::SETEQ &&
       (isCtlzOpc(RHS.getOpcode()) || isCttzOpc(RHS.getOpcode())) &&
-      RHS.getOperand(0) == CmpLHS && isNegativeOne(LHS)) {
+      RHS.getOperand(0) == CmpLHS && isAllOnesConstant(LHS)) {
     unsigned Opc =
         isCttzOpc(RHS.getOpcode()) ? AMDGPUISD::FFBL_B32 : AMDGPUISD::FFBH_U32;
     return getFFBX_U32(DAG, CmpLHS, SL, Opc);
@@ -3719,7 +3704,7 @@ SDValue AMDGPUTargetLowering::performCtlz_CttzCombine(const SDLoc &SL, SDValue C
   // select (setcc x, 0, ne), (cttz_zero_undef x), -1 -> ffbl_u32 x
   if (CCOpcode == ISD::SETNE &&
       (isCtlzOpc(LHS.getOpcode()) || isCttzOpc(LHS.getOpcode())) &&
-      LHS.getOperand(0) == CmpLHS && isNegativeOne(RHS)) {
+      LHS.getOperand(0) == CmpLHS && isAllOnesConstant(RHS)) {
     unsigned Opc =
         isCttzOpc(LHS.getOpcode()) ? AMDGPUISD::FFBL_B32 : AMDGPUISD::FFBH_U32;
 
