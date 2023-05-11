@@ -1,4 +1,4 @@
-//===-- RISCVTargetStreamer.cpp - RISCV Target Streamer Methods -----------===//
+//===-- RISCVTargetStreamer.cpp - RISC-V Target Streamer Methods ----------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file provides RISCV specific target streamer methods.
+// This file provides RISC-V specific target streamer methods.
 //
 //===----------------------------------------------------------------------===//
 
@@ -46,11 +46,13 @@ void RISCVTargetStreamer::setTargetABI(RISCVABI::ABI ABI) {
   TargetABI = ABI;
 }
 
-void RISCVTargetStreamer::emitTargetAttributes(const MCSubtargetInfo &STI) {
+void RISCVTargetStreamer::emitTargetAttributes(const MCSubtargetInfo &STI,
+                                               bool EmitStackAlign) {
   if (STI.hasFeature(RISCV::FeatureRVE))
     report_fatal_error("Codegen not yet implemented for RVE");
 
-  emitAttribute(RISCVAttrs::STACK_ALIGN, RISCVAttrs::ALIGN_16);
+  if (EmitStackAlign)
+    emitAttribute(RISCVAttrs::STACK_ALIGN, RISCVAttrs::ALIGN_16);
 
   auto ParseResult = RISCVFeatures::parseFeatureBits(
       STI.hasFeature(RISCV::Feature64Bit), STI.getFeatureBits());

@@ -179,7 +179,7 @@ static void generateFusedElementwiseOpRegion(
                     });
     for (IndexOp indexOp :
          llvm::make_early_inc_range(producerBlock.getOps<IndexOp>())) {
-      Value newIndex = rewriter.create<mlir::AffineApplyOp>(
+      Value newIndex = rewriter.create<affine::AffineApplyOp>(
           producer.getLoc(),
           consumerToProducerLoopsMap.getSubMap(indexOp.getDim()), fusedIndices);
       mapper.map(indexOp.getResult(), newIndex);
@@ -719,7 +719,7 @@ static void updateExpandedGenericOpRegion(PatternRewriter &rewriter,
       assert(!ShapedType::isDynamic(std::get<0>(it)));
       AffineExpr idx, acc;
       bindDims(rewriter.getContext(), idx, acc);
-      newIndex = rewriter.create<AffineApplyOp>(
+      newIndex = rewriter.create<affine::AffineApplyOp>(
           indexOp.getLoc(), idx + acc * std::get<0>(it),
           ValueRange{std::get<1>(it), newIndex});
     }
@@ -1004,8 +1004,8 @@ getDomainReassociation(AffineMap indexingMap,
 /// For a given `dimSequence`, check if the sequence is conserved in the
 /// `indexingMap`. `indexingMap` is expected to be a projected permutation.
 /// Non-existence of the sequence returns true as well.
-static bool isDimSequencePreserved(AffineMap indexingMap,
-                                   ReassociationIndicesRef dimSequence) {
+bool mlir::linalg::isDimSequencePreserved(AffineMap indexingMap,
+                                          ReassociationIndicesRef dimSequence) {
   assert(!dimSequence.empty() &&
          "expected non-empty list for dimension sequence");
   assert(indexingMap.isProjectedPermutation() &&
@@ -1043,6 +1043,15 @@ static bool isDimSequencePreserved(AffineMap indexingMap,
   }
   // 3. No element of sequence found. Return true.
   return true;
+}
+
+bool mlir::linalg::areDimSequencesPreserved(
+    ArrayRef<AffineMap> maps, ArrayRef<ReassociationIndices> dimSequences) {
+  return llvm::all_of(maps, [&](AffineMap map) {
+    return llvm::all_of(dimSequences, [&](ReassociationIndicesRef dimSequence) {
+      return isDimSequencePreserved(map, dimSequence);
+    });
+  });
 }
 
 // Return the list of dimensions of the iteration domain that can be
@@ -1592,6 +1601,13 @@ public:
     if (collapsableIterationDims.empty())
       return failure();
 
+    // Check if the specified list of dimensions to collapse is a valid list.
+    if (!areDimSequencesPreserved(genericOp.getIndexingMapsArray(),
+                                  collapsableIterationDims)) {
+      return rewriter.notifyMatchFailure(
+          genericOp, "specified dimensions cannot be collapsed");
+    }
+
     std::optional<SmallVector<Value>> replacements =
         collapseGenericOpIterationDims(genericOp, collapsableIterationDims,
                                        rewriter);
@@ -1688,8 +1704,8 @@ public:
       }
 
       // Create a constant scalar value from the splat constant.
-      Value scalarConstant = rewriter.create<arith::ConstantOp>(
-          def->getLoc(), constantAttr, constantAttr.getType());
+      Value scalarConstant =
+          rewriter.create<arith::ConstantOp>(def->getLoc(), constantAttr);
 
       SmallVector<Value> outputOperands = genericOp.getOutputs();
       auto fusedOp = rewriter.create<GenericOp>(
@@ -1871,7 +1887,7 @@ struct LinalgElementwiseOpFusionPass
     populateFoldReshapeOpsByExpansionPatterns(patterns, defaultControlFn);
 
     // General canonicalization patterns.
-    AffineApplyOp::getCanonicalizationPatterns(patterns, context);
+    affine::AffineApplyOp::getCanonicalizationPatterns(patterns, context);
     GenericOp::getCanonicalizationPatterns(patterns, context);
     tensor::ExpandShapeOp::getCanonicalizationPatterns(patterns, context);
     tensor::CollapseShapeOp::getCanonicalizationPatterns(patterns, context);

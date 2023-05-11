@@ -156,11 +156,16 @@ static bool DiagReservedModuleName(Sema &S, const IdentifierInfo *II,
   if (Reason == Reserved && S.getSourceManager().isInSystemHeader(Loc))
     Reason = Valid;
 
-  if (Reason != Valid) {
-    S.Diag(Loc, diag::err_invalid_module_name) << II << (int)Reason;
-    return true;
+  switch (Reason) {
+  case Valid:
+    return false;
+  case Invalid:
+    return S.Diag(Loc, diag::err_invalid_module_name) << II;
+  case Reserved:
+    S.Diag(Loc, diag::warn_reserved_module_name) << II;
+    return false;
   }
-  return false;
+  llvm_unreachable("fell off a fully covered switch");
 }
 
 Sema::DeclGroupPtrTy
@@ -250,7 +255,7 @@ Sema::ActOnModuleDecl(SourceLocation StartLoc, SourceLocation ModuleLoc,
     }
   }
 
-  // C++2b [module.unit]p1: ... The identifiers module and import shall not
+  // C++23 [module.unit]p1: ... The identifiers module and import shall not
   // appear as identifiers in a module-name or module-partition. All
   // module-names either beginning with an identifier consisting of std
   // followed by zero or more digits or containing a reserved identifier
@@ -263,11 +268,8 @@ Sema::ActOnModuleDecl(SourceLocation StartLoc, SourceLocation ModuleLoc,
   if (!getSourceManager().isInSystemHeader(Path[0].second) &&
       (FirstComponentName == "std" ||
        (FirstComponentName.startswith("std") &&
-        llvm::all_of(FirstComponentName.drop_front(3), &llvm::isDigit)))) {
-    Diag(Path[0].second, diag::err_invalid_module_name)
-        << Path[0].first << /*reserved*/ 1;
-    return nullptr;
-  }
+        llvm::all_of(FirstComponentName.drop_front(3), &llvm::isDigit))))
+    Diag(Path[0].second, diag::warn_reserved_module_name) << Path[0].first;
 
   // Then test all of the components in the path to see if any of them are
   // using another kind of reserved or invalid identifier.
@@ -387,7 +389,7 @@ Sema::ActOnModuleDecl(SourceLocation StartLoc, SourceLocation ModuleLoc,
   // statements, so imports are allowed.
   ImportState = ModuleImportState::ImportAllowed;
 
-  getASTContext().setNamedModuleForCodeGen(Mod);
+  getASTContext().setCurrentNamedModule(Mod);
 
   // We already potentially made an implicit import (in the case of a module
   // implementation unit importing its interface).  Make this module visible
@@ -1018,17 +1020,4 @@ void Sema::PopImplicitGlobalModuleFragment() {
          getCurrentModule()->isImplicitGlobalModule() &&
          "left the wrong module scope, which is not global module fragment");
   ModuleScopes.pop_back();
-}
-
-bool Sema::isModuleUnitOfCurrentTU(const Module *M) const {
-  assert(M);
-
-  Module *CurrentModuleUnit = getCurrentModule();
-
-  // If we are not in a module currently, M must not be the module unit of
-  // current TU.
-  if (!CurrentModuleUnit)
-    return false;
-
-  return M->isSubModuleOf(CurrentModuleUnit->getTopLevelModule());
 }

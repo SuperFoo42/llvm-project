@@ -12,6 +12,7 @@
 #include "ToolChains/AMDGPUOpenMP.h"
 #include "ToolChains/AVR.h"
 #include "ToolChains/Ananas.h"
+#include "ToolChains/Arch/RISCV.h"
 #include "ToolChains/BareMetal.h"
 #include "ToolChains/CSKYToolChain.h"
 #include "ToolChains/Clang.h"
@@ -689,8 +690,9 @@ static llvm::Triple computeTargetTriple(const Driver &D,
   // If target is RISC-V adjust the target triple according to
   // provided architecture name
   if (Target.isRISCV()) {
-    if ((A = Args.getLastArg(options::OPT_march_EQ))) {
-      StringRef ArchName = A->getValue();
+    if (Args.hasArg(options::OPT_march_EQ) ||
+        Args.hasArg(options::OPT_mcpu_EQ)) {
+      StringRef ArchName = tools::riscv::getRISCVArch(Args, Target);
       if (ArchName.startswith_insensitive("rv32"))
         Target.setArch(llvm::Triple::riscv32);
       else if (ArchName.startswith_insensitive("rv64"))
@@ -1393,8 +1395,9 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
   const Arg *Std = Args.getLastArg(options::OPT_std_EQ);
   ModulesModeCXX20 =
       !Args.hasArg(options::OPT_fmodules) && Std &&
-      (Std->containsValue("c++20") || Std->containsValue("c++2b") ||
-       Std->containsValue("c++2a") || Std->containsValue("c++latest"));
+      (Std->containsValue("c++20") || Std->containsValue("c++2a") ||
+       Std->containsValue("c++23") || Std->containsValue("c++2b") ||
+       Std->containsValue("c++latest"));
 
   // Process -fmodule-header{=} flags.
   if (Arg *A = Args.getLastArg(options::OPT_fmodule_header_EQ,
@@ -1808,9 +1811,6 @@ void Driver::generateCompilationDiagnostics(
           << "(choose the .crash file that corresponds to your crash)";
     }
   }
-
-  for (const auto &A : C.getArgs().filtered(options::OPT_frewrite_map_file_EQ))
-    Diag(clang::diag::note_drv_command_failed_diag_msg) << A->getValue();
 
   Diag(clang::diag::note_drv_command_failed_diag_msg)
       << "\n\n********************";
@@ -3878,6 +3878,21 @@ void Driver::handleArguments(Compilation &C, DerivedArgList &Args,
         !Args.getLastArgValue(options::OPT_fuse_ld_EQ)
              .equals_insensitive("lld"))
       Diag(clang::diag::err_drv_lto_without_lld);
+
+    // If -dumpdir is not specified, give a default prefix derived from the link
+    // output filename. For example, `clang -g -gsplit-dwarf a.c -o x` passes
+    // `-dumpdir x-` to cc1. If -o is unspecified, use
+    // stem(getDefaultImageName()) (usually stem("a.out") = "a").
+    if (!Args.hasArg(options::OPT_dumpdir)) {
+      Arg *Arg = Args.MakeSeparateArg(
+          nullptr, getOpts().getOption(options::OPT_dumpdir),
+          Args.MakeArgString(Args.getLastArgValue(
+                                 options::OPT_o,
+                                 llvm::sys::path::stem(getDefaultImageName())) +
+                             "-"));
+      Arg->claim();
+      Args.append(Arg);
+    }
   }
 
   if (FinalPhase == phases::Preprocess || Args.hasArg(options::OPT__SLASH_Y_)) {
@@ -4095,16 +4110,15 @@ void Driver::BuildActions(Compilation &C, DerivedArgList &Args,
 
       Current = NewCurrent;
 
-      // Use the current host action in any of the offloading actions, if
-      // required.
-      if (!UseNewOffloadingDriver)
-        if (OffloadBuilder->addHostDependenceToDeviceActions(Current, InputArg))
-          break;
-
       // Try to build the offloading actions and add the result as a dependency
       // to the host.
       if (UseNewOffloadingDriver)
         Current = BuildOffloadingActions(C, Args, I, Current);
+      // Use the current host action in any of the offloading actions, if
+      // required.
+      else if (OffloadBuilder->addHostDependenceToDeviceActions(Current,
+                                                                InputArg))
+        break;
 
       if (Current->getType() == types::TY_Nothing)
         break;

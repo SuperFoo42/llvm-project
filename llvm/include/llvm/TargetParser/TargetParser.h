@@ -14,6 +14,7 @@
 #ifndef LLVM_TARGETPARSER_TARGETPARSER_H
 #define LLVM_TARGETPARSER_TARGETPARSER_H
 
+#include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
 
 namespace llvm {
@@ -83,6 +84,8 @@ enum GPUKind : uint32_t {
   GK_GFX90A = 66,
   GK_GFX90C = 67,
   GK_GFX940 = 68,
+  GK_GFX941 = 69,
+  GK_GFX942 = 70,
 
   GK_GFX1010 = 71,
   GK_GFX1011 = 72,
@@ -148,6 +151,14 @@ void fillValidArchListAMDGCN(SmallVectorImpl<StringRef> &Values);
 void fillValidArchListR600(SmallVectorImpl<StringRef> &Values);
 
 IsaVersion getIsaVersion(StringRef GPU);
+
+/// Fills Features map with default values for given target GPU
+void fillAMDGPUFeatureMap(StringRef GPU, const Triple &T,
+                          StringMap<bool> &Features);
+
+/// Inserts wave size feature for given GPU into features map
+bool insertWaveSizeFeature(StringRef GPU, const Triple &T,
+                           StringMap<bool> &Features, std::string &ErrorMsg);
 
 } // namespace AMDGPU
 } // namespace llvm

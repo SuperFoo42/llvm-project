@@ -1193,7 +1193,7 @@ def FeatureISAVersion9_0_C : FeatureSet<
    FeatureMadMacF32Insts,
    FeatureImageGather4D16Bug]>;
 
-def FeatureISAVersion9_4_0 : FeatureSet<
+def FeatureISAVersion9_4_Common : FeatureSet<
   [FeatureGFX9,
    FeatureGFX90AInsts,
    FeatureGFX940Insts,
@@ -1226,6 +1226,18 @@ def FeatureISAVersion9_4_0 : FeatureSet<
    FeatureArchitectedFlatScratch,
    FullRate64Ops,
    FeatureBackOffBarrier]>;
+
+def FeatureISAVersion9_4_0 : FeatureSet<
+  !listconcat(FeatureISAVersion9_4_Common.Features,
+    [])>;
+
+def FeatureISAVersion9_4_1 : FeatureSet<
+  !listconcat(FeatureISAVersion9_4_Common.Features,
+    [])>;
+
+def FeatureISAVersion9_4_2 : FeatureSet<
+  !listconcat(FeatureISAVersion9_4_Common.Features,
+    [])>;
 
 // TODO: Organize more features into groups.
 def FeatureGroup {
@@ -1560,6 +1572,9 @@ def isGFX8Only : Predicate<"Subtarget->getGeneration() =="
 def isGFX9Plus :
   Predicate<"Subtarget->getGeneration() >= AMDGPUSubtarget::GFX9">,
   AssemblerPredicate<(all_of FeatureGFX9Insts)>;
+
+def isNotGFX9Plus :
+  Predicate<"Subtarget->getGeneration() < AMDGPUSubtarget::GFX9">;
 
 def isGFX9Only : Predicate <
   "Subtarget->getGeneration() == AMDGPUSubtarget::GFX9">,

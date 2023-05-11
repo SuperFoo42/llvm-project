@@ -39,9 +39,13 @@ def DLTI_Dialect : Dialect {
 
     constexpr const static ::llvm::StringLiteral
     kDataLayoutAllocaMemorySpaceKey = "dlti.alloca_memory_space";
+
+    constexpr const static ::llvm::StringLiteral
+    kDataLayoutStackAlignmentKey = "dlti.stack_alignment";
   }];
 
   let useDefaultAttributePrinterParser = 1;
+  let usePropertiesForAttributes = 1;
 }
 
 def DLTI_DataLayoutEntryAttr : DialectAttr<

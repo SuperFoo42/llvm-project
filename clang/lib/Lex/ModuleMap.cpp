@@ -683,12 +683,12 @@ ModuleMap::findOrCreateModuleForHeaderInUmbrellaDir(const FileEntry *File) {
 }
 
 ArrayRef<ModuleMap::KnownHeader>
-ModuleMap::findAllModulesForHeader(const FileEntry *File) {
+ModuleMap::findAllModulesForHeader(const FileEntry *File, bool AllowCreation) {
   HeadersMap::iterator Known = findKnownHeader(File);
   if (Known != Headers.end())
     return Known->second;
 
-  if (findOrCreateModuleForHeaderInUmbrellaDir(File))
+  if (AllowCreation && findOrCreateModuleForHeaderInUmbrellaDir(File))
     return Headers.find(File)->second;
 
   return std::nullopt;
@@ -929,15 +929,19 @@ Module *ModuleMap::createModuleForImplementationUnit(SourceLocation Loc,
   assert(Modules[Name] && Modules[Name]->Kind == Module::ModuleInterfaceUnit &&
          "creating implementation module without an interface");
 
+  // Create an entry in the modules map to own the implementation unit module.
+  // User module names must not start with a period (so that this cannot clash
+  // with any legal user-defined module name).
+  StringRef IName = ".ImplementationUnit";
+  assert(!Modules[IName] && "multiple implementation units?");
+
   auto *Result =
       createModuleUnitWithKind(Loc, Name, Module::ModuleImplementationUnit);
-  SourceModule = Result;
+  Modules[IName] = SourceModule = Result;
 
-  // Mark the main source file as being within the newly-created module so that
-  // declarations and macros are properly visibility-restricted to it.
-  auto *MainFile = SourceMgr.getFileEntryForID(SourceMgr.getMainFileID());
-  (void)MainFile;
-  assert(MainFile && "no input file for module implementation");
+  // Check that the main file is present.
+  assert(SourceMgr.getFileEntryForID(SourceMgr.getMainFileID()) &&
+         "no input file for module implementation");
 
   return Result;
 }

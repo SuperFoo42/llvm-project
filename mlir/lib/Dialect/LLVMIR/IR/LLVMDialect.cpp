@@ -732,7 +732,7 @@ static bool isTypeCompatibleWithAtomicOp(Type type, bool isPointerTypeAllowed) {
   if (type.isa<LLVMPointerType>())
     return isPointerTypeAllowed;
 
-  std::optional<unsigned> bitWidth = std::nullopt;
+  std::optional<unsigned> bitWidth;
   if (auto floatType = type.dyn_cast<FloatType>()) {
     if (!isCompatibleFloatingPointType(type))
       return false;
@@ -931,6 +931,16 @@ CallInterfaceCallable CallOp::getCallableForCallee() {
     return calleeAttr;
   // Indirect call, callee Value is the first operand.
   return getOperand(0);
+}
+
+void CallOp::setCalleeFromCallable(CallInterfaceCallable callee) {
+  // Direct call.
+  if (FlatSymbolRefAttr calleeAttr = getCalleeAttr()) {
+    auto symRef = callee.get<SymbolRefAttr>();
+    return setCalleeAttr(cast<FlatSymbolRefAttr>(symRef));
+  }
+  // Indirect call, callee Value is the first operand.
+  return setOperand(0, callee.get<Value>());
 }
 
 Operation::operand_range CallOp::getArgOperands() {
@@ -1157,6 +1167,16 @@ CallInterfaceCallable InvokeOp::getCallableForCallee() {
   return getOperand(0);
 }
 
+void InvokeOp::setCalleeFromCallable(CallInterfaceCallable callee) {
+  // Direct call.
+  if (FlatSymbolRefAttr calleeAttr = getCalleeAttr()) {
+    auto symRef = callee.get<SymbolRefAttr>();
+    return setCalleeAttr(cast<FlatSymbolRefAttr>(symRef));
+  }
+  // Indirect call, callee Value is the first operand.
+  return setOperand(0, callee.get<Value>());
+}
+
 Operation::operand_range InvokeOp::getArgOperands() {
   return getOperands().drop_front(getCallee().has_value() ? 0 : 1);
 }
@@ -1262,6 +1282,9 @@ LogicalResult LandingpadOp::verify() {
       return emitError(
           "llvm.landingpad needs to be in a function with a personality");
   }
+
+  // Consistency of llvm.landingpad result types is checked in
+  // LLVMFuncOp::verify().
 
   if (!getCleanup() && getOperands().empty())
     return emitError("landingpad instruction expects at least one clause or "
@@ -1515,17 +1538,6 @@ LogicalResult ReturnOp::verify() {
     diag.attachNote(parent->getLoc()) << "when returning from function";
     return diag;
   }
-  return success();
-}
-
-//===----------------------------------------------------------------------===//
-// ResumeOp
-//===----------------------------------------------------------------------===//
-
-LogicalResult ResumeOp::verify() {
-  if (!getValue().getDefiningOp<LandingpadOp>())
-    return emitOpError("expects landingpad value as operand");
-  // No check for personality of function - landingpad op verifies it.
   return success();
 }
 
@@ -2169,6 +2181,42 @@ LogicalResult LLVMFuncOp::verify() {
                            << stringifyLinkage(LLVM::Linkage::ExternWeak)
                            << "' linkage";
     return success();
+  }
+
+  Type landingpadResultTy;
+  StringRef diagnosticMessage;
+  bool isLandingpadTypeConsistent =
+      !walk([&](Operation *op) {
+         const auto checkType = [&](Type type, StringRef errorMessage) {
+           if (!landingpadResultTy) {
+             landingpadResultTy = type;
+             return WalkResult::advance();
+           }
+           if (landingpadResultTy != type) {
+             diagnosticMessage = errorMessage;
+             return WalkResult::interrupt();
+           }
+           return WalkResult::advance();
+         };
+         return TypeSwitch<Operation *, WalkResult>(op)
+             .Case<LandingpadOp>([&](auto landingpad) {
+               constexpr StringLiteral errorMessage =
+                   "'llvm.landingpad' should have a consistent result type "
+                   "inside a function";
+               return checkType(landingpad.getType(), errorMessage);
+             })
+             .Case<ResumeOp>([&](auto resume) {
+               constexpr StringLiteral errorMessage =
+                   "'llvm.resume' should have a consistent input type inside a "
+                   "function";
+               return checkType(resume.getValue().getType(), errorMessage);
+             })
+             .Default([](auto) { return WalkResult::skip(); });
+       }).wasInterrupted();
+  if (!isLandingpadTypeConsistent) {
+    assert(!diagnosticMessage.empty() &&
+           "Expecting a non-empty diagnostic message");
+    return emitError(diagnosticMessage);
   }
 
   return success();
