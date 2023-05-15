@@ -843,7 +843,7 @@ AsyncParallelForRewrite::matchAndRewrite(scf::ParallelOp op,
   }
 
   //initialize memrefs
-  for (auto &en : llvm::enumerate(llvm::zip(resultMemRefs, op.getInitVals())))
+  for (const auto &en : llvm::enumerate(llvm::zip(resultMemRefs, op.getInitVals())))
   {
     Value memref, initVal;
     std::tie(memref, initVal) = en.value();
