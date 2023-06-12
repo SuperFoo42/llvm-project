@@ -187,7 +187,7 @@ private:
   /// Track symbols symbols processed during and after the registration
   /// to avoid infinite loops between type conversions and global variable
   /// creation.
-  llvm::SmallSetVector<Fortran::semantics::SymbolRef, 64> seen;
+  llvm::SmallSetVector<Fortran::semantics::SymbolRef, 32> seen;
 };
 
 class DispatchTableConverter {
@@ -227,13 +227,14 @@ public:
         builder.createBlock(&dt.getRegion());
 
       for (const Fortran::semantics::SymbolRef &binding : bindings) {
-        const auto *details =
-            binding.get().detailsIf<Fortran::semantics::ProcBindingDetails>();
-        std::string bindingName = converter.mangleName(details->symbol());
+        const auto &details =
+            binding.get().get<Fortran::semantics::ProcBindingDetails>();
+        std::string tbpName = binding.get().name().ToString();
+        if (details.numPrivatesNotOverridden() > 0)
+          tbpName += "."s + std::to_string(details.numPrivatesNotOverridden());
+        std::string bindingName = converter.mangleName(details.symbol());
         builder.create<fir::DTEntryOp>(
-            info.loc,
-            mlir::StringAttr::get(builder.getContext(),
-                                  binding.get().name().ToString()),
+            info.loc, mlir::StringAttr::get(builder.getContext(), tbpName),
             mlir::SymbolRefAttr::get(builder.getContext(), bindingName));
       }
       if (!bindings.empty())
@@ -611,23 +612,6 @@ public:
           return fir::substBase(hexv, temp);
         });
 
-    // Replace all uses of the original with the clone/copy,
-    // esepcially for loop bounds (that uses the variable being privatised)
-    // since loop bounds use old values that need to be fixed by using the
-    // new copied value.
-    // Not able to use replaceAllUsesWith() because uses outside
-    // the loop body should not use the clone.
-    // FIXME: Call privatization before the loop operation.
-    mlir::Region &curRegion = getFirOpBuilder().getRegion();
-    mlir::Value oldVal = fir::getBase(hexv);
-    mlir::Value cloneVal = fir::getBase(exv);
-    for (auto &oper : curRegion.getOps()) {
-      for (unsigned int ii = 0; ii < oper.getNumOperands(); ++ii) {
-        if (oper.getOperand(ii) == oldVal) {
-          oper.setOperand(ii, cloneVal);
-        }
-      }
-    }
     return bindIfNewSymbol(sym, exv);
   }
 
@@ -742,6 +726,10 @@ public:
     return genUnknownLocation();
   }
 
+  const Fortran::semantics::Scope &getCurrentScope() override final {
+    return bridge.getSemanticsContext().FindScope(currentPosition);
+  }
+
   fir::FirOpBuilder &getFirOpBuilder() override final { return *builder; }
 
   mlir::ModuleOp &getModuleOp() override final { return bridge.getModule(); }
@@ -757,7 +745,10 @@ public:
       const Fortran::semantics::DerivedTypeSpec &derivedType) override final {
     return Fortran::lower::mangle::mangleName(derivedType, scopeBlockIdMap);
   }
-
+  std::string mangleName(std::string &name) override final {
+    return Fortran::lower::mangle::mangleName(name, getCurrentScope(),
+                                              scopeBlockIdMap);
+  }
   const fir::KindMapping &getKindMap() override final {
     return bridge.getKindMap();
   }
@@ -791,6 +782,40 @@ public:
     dispatchTableConverter.registerTypeSpec(*this, loc, typeSpec);
   }
 
+  llvm::StringRef
+  getUniqueLitName(mlir::Location loc,
+                   std::unique_ptr<Fortran::lower::SomeExpr> expr,
+                   mlir::Type eleTy) override final {
+    std::string namePrefix =
+        getConstantExprManglePrefix(loc, *expr.get(), eleTy);
+    auto [it, inserted] = literalNamesMap.try_emplace(
+        expr.get(), namePrefix + std::to_string(uniqueLitId));
+    const auto &name = it->second;
+    if (inserted) {
+      // Keep ownership of the expr key.
+      literalExprsStorage.push_back(std::move(expr));
+
+      // If we've just added a new name, we have to make sure
+      // there is no global object with the same name in the module.
+      fir::GlobalOp global = builder->getNamedGlobal(name);
+      if (global)
+        fir::emitFatalError(loc, llvm::Twine("global object with name '") +
+                                     llvm::Twine(name) +
+                                     llvm::Twine("' already exists"));
+      ++uniqueLitId;
+      return name;
+    }
+
+    // The name already exists. Verify that the prefix is the same.
+    if (!llvm::StringRef(name).starts_with(namePrefix))
+      fir::emitFatalError(loc, llvm::Twine("conflicting prefixes: '") +
+                                   llvm::Twine(name) +
+                                   llvm::Twine("' does not start with '") +
+                                   llvm::Twine(namePrefix) + llvm::Twine("'"));
+
+    return name;
+  }
+
 private:
   FirConverter() = delete;
   FirConverter(const FirConverter &) = delete;
@@ -822,6 +847,20 @@ private:
             },
             [](auto x) -> Fortran::lower::SymbolBox { return x; });
       }
+
+      // Entry character result represented as an argument pair
+      // needs to be represented in the symbol table even before
+      // we can create DeclareOp for it. The temporary mapping
+      // is EmboxCharOp that conveys the address and length information.
+      // After mapSymbolAttributes is done, the mapping is replaced
+      // with the new DeclareOp, and the following table lookups
+      // do not reach here.
+      if (sym.IsFuncResult())
+        if (const Fortran::semantics::DeclTypeSpec *declTy = sym.GetType())
+          if (declTy->category() ==
+              Fortran::semantics::DeclTypeSpec::Category::Character)
+            return symMap->lookupSymbol(sym);
+
       // Procedure dummies are not mapped with an hlfir.declare because
       // they are not "variable" (cannot be assigned to), and it would
       // make hlfir.declare more complex than it needs to to allow this.
@@ -1265,7 +1304,7 @@ private:
   void genFIR(const Fortran::parser::CallStmt &stmt) {
     Fortran::lower::StatementContext stmtCtx;
     Fortran::lower::pft::Evaluation &eval = getEval();
-    setCurrentPosition(stmt.v.source);
+    setCurrentPosition(stmt.source);
     assert(stmt.typedCall && "Call was not analyzed");
     mlir::Value res{};
     if (lowerToHighLevelFIR()) {
@@ -1292,7 +1331,7 @@ private:
     llvm::SmallVector<Fortran::parser::Label> labelList;
     int64_t index = 0;
     for (const Fortran::parser::ActualArgSpec &arg :
-         std::get<std::list<Fortran::parser::ActualArgSpec>>(stmt.v.t)) {
+         std::get<std::list<Fortran::parser::ActualArgSpec>>(stmt.call.t)) {
       const auto &actual = std::get<Fortran::parser::ActualArg>(arg.t);
       if (const auto *altReturn =
               std::get_if<Fortran::parser::AltReturnSpec>(&actual.u)) {
@@ -1791,8 +1830,12 @@ private:
     Fortran::lower::pft::Evaluation &eval = getEval();
     Fortran::lower::StatementContext stmtCtx;
     pushActiveConstruct(eval, stmtCtx);
-    for (Fortran::lower::pft::Evaluation &e : getEval().getNestedEvaluations())
-      genFIR(e);
+    for (Fortran::lower::pft::Evaluation &e : eval.getNestedEvaluations()) {
+      if (e.getIf<Fortran::parser::EndSelectStmt>())
+        maybeStartBlock(e.block);
+      else
+        genFIR(e);
+    }
     popActiveConstruct();
   }
 
@@ -2652,7 +2695,7 @@ private:
         builder->restoreInsertionPoint(crtInsPt);
         ++typeGuardIdx;
       } else if (eval.getIf<Fortran::parser::EndSelectStmt>()) {
-        genFIR(eval);
+        maybeStartBlock(eval.block);
         if (hasLocalScope)
           localSymbols.popScope();
       } else {
@@ -3332,7 +3375,10 @@ private:
               // Scalar assignment
               const bool isNumericScalar =
                   isNumericScalarCategory(lhsType->category());
-              fir::ExtendedValue rhs = isNumericScalar
+              const bool isVector =
+                  isDerivedCategory(lhsType->category()) &&
+                  lhsType->GetDerivedTypeSpec().IsVectorType();
+              fir::ExtendedValue rhs = (isNumericScalar || isVector)
                                            ? genExprValue(assign.rhs, stmtCtx)
                                            : genExprAddr(assign.rhs, stmtCtx);
               const bool lhsIsWholeAllocatable =
@@ -3380,7 +3426,7 @@ private:
                 return genExprAddr(assign.lhs, stmtCtx);
               }();
 
-              if (isNumericScalar) {
+              if (isNumericScalar || isVector) {
                 // Fortran 2018 10.2.1.3 p8 and p9
                 // Conversions should have been inserted by semantic analysis,
                 // but they can be incorrect between the rhs and lhs. Correct
@@ -3394,7 +3440,8 @@ private:
                 // conversion to the actual type.
                 mlir::Type toTy = genType(assign.lhs);
                 mlir::Value cast =
-                    builder->convertWithSemantics(loc, toTy, val);
+                    isVector ? val
+                             : builder->convertWithSemantics(loc, toTy, val);
                 if (fir::dyn_cast_ptrEleTy(addr.getType()) != toTy) {
                   assert(isFuncResultDesignator(assign.lhs) && "type mismatch");
                   addr = builder->createConvert(
@@ -4397,6 +4444,49 @@ private:
     return bridge.getLoweringOptions().getLowerToHighLevelFIR();
   }
 
+  // Returns the mangling prefix for the given constant expression.
+  std::string getConstantExprManglePrefix(mlir::Location loc,
+                                          const Fortran::lower::SomeExpr &expr,
+                                          mlir::Type eleTy) {
+    return std::visit(
+        [&](const auto &x) -> std::string {
+          using T = std::decay_t<decltype(x)>;
+          if constexpr (Fortran::common::HasMember<
+                            T, Fortran::lower::CategoryExpression>) {
+            if constexpr (T::Result::category ==
+                          Fortran::common::TypeCategory::Derived) {
+              if (const auto *constant =
+                      std::get_if<Fortran::evaluate::Constant<
+                          Fortran::evaluate::SomeDerived>>(&x.u))
+                return Fortran::lower::mangle::mangleArrayLiteral(eleTy,
+                                                                  *constant);
+              fir::emitFatalError(loc,
+                                  "non a constant derived type expression");
+            } else {
+              return std::visit(
+                  [&](const auto &someKind) -> std::string {
+                    using T = std::decay_t<decltype(someKind)>;
+                    using TK = Fortran::evaluate::Type<T::Result::category,
+                                                       T::Result::kind>;
+                    if (const auto *constant =
+                            std::get_if<Fortran::evaluate::Constant<TK>>(
+                                &someKind.u)) {
+                      return Fortran::lower::mangle::mangleArrayLiteral(
+                          nullptr, *constant);
+                    }
+                    fir::emitFatalError(
+                        loc, "not a Fortran::evaluate::Constant<T> expression");
+                    return {};
+                  },
+                  x.u);
+            }
+          } else {
+            fir::emitFatalError(loc, "unexpected expression");
+          }
+        },
+        expr.u);
+  }
+
   //===--------------------------------------------------------------------===//
 
   Fortran::lower::LoweringBridge &bridge;
@@ -4423,6 +4513,23 @@ private:
 
   /// Tuple of host associated variables
   mlir::Value hostAssocTuple;
+
+  /// A map of unique names for constant expressions.
+  /// The names are used for representing the constant expressions
+  /// with global constant initialized objects.
+  /// The names are usually prefixed by a mangling string based
+  /// on the element type of the constant expression, but the element
+  /// type is not used as a key into the map (so the assumption is that
+  /// the equivalent constant expressions are prefixed using the same
+  /// element type).
+  llvm::DenseMap<const Fortran::lower::SomeExpr *, std::string> literalNamesMap;
+
+  /// Storage for Constant expressions used as keys for literalNamesMap.
+  llvm::SmallVector<std::unique_ptr<Fortran::lower::SomeExpr>>
+      literalExprsStorage;
+
+  /// A counter for uniquing names in `literalNamesMap`.
+  std::uint64_t uniqueLitId = 0;
 };
 
 } // namespace

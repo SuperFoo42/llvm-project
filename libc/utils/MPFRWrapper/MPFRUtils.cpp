@@ -12,6 +12,7 @@
 #include "src/__support/CPP/string_view.h"
 #include "src/__support/FPUtil/FPBits.h"
 #include "src/__support/FPUtil/PlatformDefs.h"
+#include "src/__support/FPUtil/fpbits_str.h"
 #include "test/UnitTest/FPMatcher.h"
 
 #include <cmath>
@@ -19,16 +20,7 @@
 #include <memory>
 #include <stdint.h>
 
-#ifdef CUSTOM_MPFR_INCLUDER
-// Some downstream repos are monoliths carrying MPFR sources in their third
-// party directory. In such repos, including the MPFR header as
-// `#include <mpfr.h>` is either disallowed or not possible. If that is the
-// case, a file named `CustomMPFRIncluder.h` should be added through which the
-// MPFR header can be included in manner allowed in that repo.
-#include "CustomMPFRIncluder.h"
-#else
-#include <mpfr.h>
-#endif
+#include "mpfr_inc.h"
 
 template <typename T> using FPBits = __llvm_libc::fputil::FPBits<T>;
 
@@ -703,12 +695,11 @@ void explain_unary_operation_single_output_error(Operation op, T input,
   MPFRNumber mpfrMatchValue(matchValue);
   tlog << "Match value not within tolerance value of MPFR result:\n"
        << "  Input decimal: " << mpfrInput.str() << '\n';
-  __llvm_libc::fputil::testing::describeValue("     Input bits: ", input);
+  tlog << "     Input bits: " << str(FPBits<T>(input)) << '\n';
   tlog << '\n' << "  Match decimal: " << mpfrMatchValue.str() << '\n';
-  __llvm_libc::fputil::testing::describeValue("     Match bits: ", matchValue);
+  tlog << "     Match bits: " << str(FPBits<T>(matchValue)) << '\n';
   tlog << '\n' << "    MPFR result: " << mpfr_result.str() << '\n';
-  __llvm_libc::fputil::testing::describeValue("   MPFR rounded: ",
-                                              mpfr_result.as<T>());
+  tlog << "   MPFR rounded: " << str(FPBits<T>(mpfr_result.as<T>())) << '\n';
   tlog << '\n';
   tlog << "      ULP error: "
        << mpfr_result.ulp_as_mpfr_number(matchValue).str() << '\n';
@@ -748,13 +739,13 @@ void explain_unary_operation_two_outputs_error(
   tlog << "            Input decimal: " << mpfrInput.str() << "\n\n";
 
   tlog << "Libc floating point value: " << mpfrMatchValue.str() << '\n';
-  __llvm_libc::fputil::testing::describeValue(" Libc floating point bits: ",
-                                              libc_result.f);
+  tlog << " Libc floating point bits: " << str(FPBits<T>(libc_result.f))
+       << '\n';
   tlog << "\n\n";
 
   tlog << "              MPFR result: " << mpfr_result.str() << '\n';
-  __llvm_libc::fputil::testing::describeValue("             MPFR rounded: ",
-                                              mpfr_result.as<T>());
+  tlog << "             MPFR rounded: " << str(FPBits<T>(mpfr_result.as<T>()))
+       << '\n';
   tlog << '\n'
        << "                ULP error: "
        << mpfr_result.ulp_as_mpfr_number(libc_result.f).str() << '\n';
@@ -786,10 +777,10 @@ void explain_binary_operation_two_outputs_error(
        << "Libc integral result: " << libc_result.i << '\n'
        << "Libc floating point result: " << mpfrMatchValue.str() << '\n'
        << "               MPFR result: " << mpfr_result.str() << '\n';
-  __llvm_libc::fputil::testing::describeValue(
-      "Libc floating point result bits: ", libc_result.f);
-  __llvm_libc::fputil::testing::describeValue(
-      "              MPFR rounded bits: ", mpfr_result.as<T>());
+  tlog << "Libc floating point result bits: " << str(FPBits<T>(libc_result.f))
+       << '\n';
+  tlog << "              MPFR rounded bits: "
+       << str(FPBits<T>(mpfr_result.as<T>())) << '\n';
   tlog << "ULP error: " << mpfr_result.ulp_as_mpfr_number(libc_result.f).str()
        << '\n';
 }
@@ -820,15 +811,15 @@ void explain_binary_operation_one_output_error(Operation op,
   MPFRNumber mpfrMatchValue(libc_result);
 
   tlog << "Input decimal: x: " << mpfrX.str() << " y: " << mpfrY.str() << '\n';
-  __llvm_libc::fputil::testing::describeValue("First input bits: ", input.x);
-  __llvm_libc::fputil::testing::describeValue("Second input bits: ", input.y);
+  tlog << "First input bits: " << str(FPBits<T>(input.x)) << '\n';
+  tlog << "Second input bits: " << str(FPBits<T>(input.y)) << '\n';
 
   tlog << "Libc result: " << mpfrMatchValue.str() << '\n'
        << "MPFR result: " << mpfr_result.str() << '\n';
-  __llvm_libc::fputil::testing::describeValue(
-      "Libc floating point result bits: ", libc_result);
-  __llvm_libc::fputil::testing::describeValue(
-      "              MPFR rounded bits: ", mpfr_result.as<T>());
+  tlog << "Libc floating point result bits: " << str(FPBits<T>(libc_result))
+       << '\n';
+  tlog << "              MPFR rounded bits: "
+       << str(FPBits<T>(mpfr_result.as<T>())) << '\n';
   tlog << "ULP error: " << mpfr_result.ulp_as_mpfr_number(libc_result).str()
        << '\n';
 }
@@ -860,16 +851,16 @@ void explain_ternary_operation_one_output_error(Operation op,
 
   tlog << "Input decimal: x: " << mpfrX.str() << " y: " << mpfrY.str()
        << " z: " << mpfrZ.str() << '\n';
-  __llvm_libc::fputil::testing::describeValue("First input bits: ", input.x);
-  __llvm_libc::fputil::testing::describeValue("Second input bits: ", input.y);
-  __llvm_libc::fputil::testing::describeValue("Third input bits: ", input.z);
+  tlog << " First input bits: " << str(FPBits<T>(input.x)) << '\n';
+  tlog << "Second input bits: " << str(FPBits<T>(input.y)) << '\n';
+  tlog << " Third input bits: " << str(FPBits<T>(input.z)) << '\n';
 
   tlog << "Libc result: " << mpfrMatchValue.str() << '\n'
        << "MPFR result: " << mpfr_result.str() << '\n';
-  __llvm_libc::fputil::testing::describeValue(
-      "Libc floating point result bits: ", libc_result);
-  __llvm_libc::fputil::testing::describeValue(
-      "              MPFR rounded bits: ", mpfr_result.as<T>());
+  tlog << "Libc floating point result bits: " << str(FPBits<T>(libc_result))
+       << '\n';
+  tlog << "              MPFR rounded bits: "
+       << str(FPBits<T>(mpfr_result.as<T>())) << '\n';
   tlog << "ULP error: " << mpfr_result.ulp_as_mpfr_number(libc_result).str()
        << '\n';
 }

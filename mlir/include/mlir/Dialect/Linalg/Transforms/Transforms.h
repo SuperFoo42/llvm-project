@@ -148,6 +148,12 @@ struct LinalgPaddingOptions {
     paddingDimensions.assign(pd.begin(), pd.end());
     return *this;
   }
+  /// A list of multiples to which each padding dimension should be padded to.
+  std::optional<SmallVector<int64_t>> padToMultipleOf;
+  LinalgPaddingOptions &setPadToMultipleOf(ArrayRef<int64_t> m) {
+    padToMultipleOf.emplace(m.begin(), m.end());
+    return *this;
+  }
   /// A flag for every operand to mark the PadOp as nofold which enables
   /// packing for statically shaped operands.
   SmallVector<bool> packPaddings;
@@ -291,10 +297,9 @@ LogicalResult promoteSubviewsPrecondition(Operation *op,
                                           LinalgPromotionOptions options);
 
 /// Return success if the operation can be vectorized.
-LogicalResult
-vectorizeLinalgOpPrecondition(LinalgOp linalgOp,
-                              ArrayRef<int64_t> inputVectorSizes = {},
-                              bool vectorizeNDExtract = false);
+LogicalResult vectorizeOpPrecondition(Operation *op,
+                                      ArrayRef<int64_t> inputVectorSizes = {},
+                                      bool vectorizeNDExtract = false);
 
 //===----------------------------------------------------------------------===//
 // Transformations exposed as functional-style API calls.
@@ -351,14 +356,17 @@ SmallVector<Value> peelLoop(RewriterBase &rewriter, Operation *op);
 void peelLoops(RewriterBase &rewriter, ArrayRef<scf::ForOp> loops);
 
 /// Pad the iterator dimensions `paddingDimensions` of all `opToPad` operands
-/// to a static bounding box. Use `paddingValues` and `packPaddings` to set
-/// padding value and nofold attribute of the created tensor::PadOps,
-/// respectively. Update `paddedOp` to the cloned operation with statically
-/// shaped `paddingDimensions` and return the extracted dynamically shaped
-/// results. If padding fails, return failure.
+/// to a static bounding box. `padToMultipleOf` indicates that each padding
+/// dimension should be padded to the specified multiple. If the derived padding
+/// sizes should not be rounded up to any multiple, use "1". Use `paddingValues`
+/// and `packPaddings` to set padding value and nofold attribute of the created
+/// tensor::PadOps, respectively. Update `paddedOp` to the cloned operation with
+/// statically shaped `paddingDimensions` and return the extracted dynamically
+/// shaped results. If padding fails, return failure.
 FailureOr<SmallVector<Value>>
 rewriteAsPaddedOp(RewriterBase &rewriter, LinalgOp opToPad,
                   ArrayRef<int64_t> paddingDimensions,
+                  ArrayRef<int64_t> padToMultipleOf,
                   ArrayRef<Attribute> paddingValues,
                   ArrayRef<bool> packPaddings, LinalgOp &paddedOp);
 
@@ -576,25 +584,19 @@ LogicalResult copyToGPUPrivateMemory(OpBuilder &b, Value src, Value dst);
 /// memory is freed when going outside of the scope.
 LogicalResult deallocateGPUPrivateMemory(OpBuilder &, Value /*buffer*/);
 
-/// Emit a suitable vector form for a Linalg op. If provided, `inputVectorSizes`
-/// are used to vectorize this operation. `inputVectorSizes` must match the rank
-/// of the iteration space of the operation and the sizes must be smaller or
-/// equal than their counterpart interation space sizes, if static.
-/// `inputVectorShapes` also allows the vectorization of operations with dynamic
-/// shapes.
-LogicalResult vectorize(RewriterBase &rewriter, LinalgOp linalgOp,
+/// Emit a suitable vector form for an operation. If provided,
+/// `inputVectorSizes` are used to vectorize this operation. `inputVectorSizes`
+/// must match the rank of the iteration space of the operation and the sizes
+/// must be smaller or equal than their counterpart interation space sizes, if
+/// static. `inputVectorShapes` also allows the vectorization of operations with
+/// dynamic shapes.
+LogicalResult vectorize(RewriterBase &rewriter, Operation *op,
                         ArrayRef<int64_t> inputVectorSizes = {},
-                        bool vectorizeNDExtract = false);
+                        bool vectorizeNDExtract = false,
+                        bool lastVectorSizeScalable = false);
 
 /// Emit a suitable vector form for a Copy op with fully static shape.
 LogicalResult vectorizeCopy(RewriterBase &builder, memref::CopyOp copyOp);
-
-/// Vectorize a `padOp` with (1) static result type, (2) constant padding value
-/// and (3) all-zero lowPad to
-///   `transfer_write_in_bounds(transfer_read_masked(pad_source, pad_value))`.
-FailureOr<vector::TransferWriteOp>
-maskedVectorize(RewriterBase &rewriter, tensor::PadOp padOp,
-                ArrayRef<int64_t> inputVectorSizes);
 
 /// Emit a loop nest of `scf.for` with the proper body for `linalgOp`.
 FailureOr<LinalgLoops> linalgOpToLoops(RewriterBase &rewriter,
@@ -1312,9 +1314,6 @@ void populateDecomposeConvolutionPatterns(RewritePatternSet &patterns,
 /// linalg.generic (for img2col packing) and linalg.matmul.
 /// \see rewriteInIm2Col for more details.
 void populateConvertConv2DToImg2ColPatterns(RewritePatternSet &patterns);
-
-void populatePadTensorTilingPatterns(RewritePatternSet &patterns,
-                                     const LinalgTilingOptions &options);
 
 /// Populates `patterns` with patterns that vectorize tensor.pad.
 /// These patterns are meant to apply in a complementary fashion. Benefits

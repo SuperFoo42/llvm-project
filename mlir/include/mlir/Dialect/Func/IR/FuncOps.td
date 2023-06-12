@@ -21,7 +21,6 @@ include "mlir/Interfaces/SideEffectInterfaces.td"
 def Func_Dialect : Dialect {
   let name = "func";
   let cppNamespace = "::mlir::func";
-  let dependentDialects = ["cf::ControlFlowDialect"];
   let hasConstantMaterializer = 1;
   let usePropertiesForAttributes = 1;
 }
@@ -111,10 +110,10 @@ def CallIndirectOp : Func_Op<"call_indirect", [
       CallOpInterface,
       TypesMatchWith<"callee input types match argument types",
                      "callee", "callee_operands",
-                     "$_self.cast<FunctionType>().getInputs()">,
+                     "::llvm::cast<FunctionType>($_self).getInputs()">,
       TypesMatchWith<"callee result types match result types",
                      "callee", "results",
-                     "$_self.cast<FunctionType>().getResults()">
+                     "::llvm::cast<FunctionType>($_self).getResults()">
     ]> {
   let summary = "indirect call operation";
   let description = [{
@@ -141,7 +140,7 @@ def CallIndirectOp : Func_Op<"call_indirect", [
     OpBuilder<(ins "Value":$callee, CArg<"ValueRange", "{}">:$operands), [{
       $_state.operands.push_back(callee);
       $_state.addOperands(operands);
-      $_state.addTypes(callee.getType().cast<FunctionType>().getResults());
+      $_state.addTypes(::llvm::cast<FunctionType>(callee.getType()).getResults());
     }]>];
 
   let extraClassDeclaration = [{

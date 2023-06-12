@@ -174,6 +174,29 @@ CUresult launch_kernel(CUmodule binary, CUstream stream,
                          CU_LAUNCH_PARAM_BUFFER_SIZE, &args_size,
                          CU_LAUNCH_PARAM_END};
 
+  // Initialize a non-blocking CUDA stream to allocate memory if needed. This
+  // needs to be done on a separate stream or else it will deadlock with the
+  // executing kernel.
+  CUstream memory_stream;
+  if (CUresult err = cuStreamCreate(&memory_stream, CU_STREAM_NON_BLOCKING))
+    handle_error(err);
+
+  auto allocator = [&](uint64_t size) -> void * {
+    CUdeviceptr dev_ptr;
+    if (CUresult err = cuMemAllocAsync(&dev_ptr, size, memory_stream))
+      handle_error(err);
+
+    // Wait until the memory allocation is complete.
+    while (cuStreamQuery(memory_stream) == CUDA_ERROR_NOT_READY)
+      ;
+    return reinterpret_cast<void *>(dev_ptr);
+  };
+  auto deallocator = [&](void *ptr) -> void {
+    if (CUresult err =
+            cuMemFreeAsync(reinterpret_cast<CUdeviceptr>(ptr), memory_stream))
+      handle_error(err);
+  };
+
   // Call the kernel with the given arguments.
   if (CUresult err = cuLaunchKernel(
           function, params.num_blocks_x, params.num_blocks_y,
@@ -184,7 +207,11 @@ CUresult launch_kernel(CUmodule binary, CUstream stream,
   // Wait until the kernel has completed execution on the device. Periodically
   // check the RPC client for work to be performed on the server.
   while (cuStreamQuery(stream) == CUDA_ERROR_NOT_READY)
-    handle_server();
+    handle_server(allocator, deallocator);
+
+  // Handle the server one more time in case the kernel exited with a pending
+  // send still in flight.
+  handle_server(allocator, deallocator);
 
   return CUDA_SUCCESS;
 }
@@ -204,6 +231,12 @@ int load(int argc, char **argv, char **envp, void *image, size_t size,
   if (CUresult err = cuDevicePrimaryCtxRetain(&context, device))
     handle_error(err);
   if (CUresult err = cuCtxSetCurrent(context))
+    handle_error(err);
+
+  // Increase the stack size per thread.
+  // TODO: We should allow this to be passed in so only the tests that require a
+  // larger stack can specify it to save on memory usage.
+  if (CUresult err = cuCtxSetLimit(CU_LIMIT_STACK_SIZE, 3 * 1024))
     handle_error(err);
 
   // Initialize a non-blocking CUDA stream to execute the kernel.
@@ -246,7 +279,7 @@ int load(int argc, char **argv, char **envp, void *image, size_t size,
   if (CUresult err = cuMemsetD32(dev_ret, 0, 1))
     handle_error(err);
 
-  uint64_t port_size = __llvm_libc::rpc::default_port_count;
+  uint64_t port_size = __llvm_libc::rpc::DEFAULT_PORT_COUNT;
   uint32_t warp_size = 32;
 
   uint64_t rpc_shared_buffer_size =

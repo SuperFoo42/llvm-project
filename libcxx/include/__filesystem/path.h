@@ -39,7 +39,7 @@
 
 _LIBCPP_BEGIN_NAMESPACE_FILESYSTEM
 
-_LIBCPP_AVAILABILITY_FILESYSTEM_PUSH
+_LIBCPP_AVAILABILITY_FILESYSTEM_LIBRARY_PUSH
 
 template <class _Tp>
 struct __can_convert_char {
@@ -173,7 +173,7 @@ struct __is_pathable_char_array<_Source, _ECharT*, _UPtr, true>
   static _ECharT __first_or_null(const _ECharT* __b) { return *__b; }
 };
 
-template <class _Iter, bool _IsIt = __is_cpp17_input_iterator<_Iter>::value,
+template <class _Iter, bool _IsIt = __has_input_iterator_category<_Iter>::value,
           class = void>
 struct __is_pathable_iter : false_type {};
 
@@ -308,7 +308,7 @@ struct _PathCVT<__path_value> {
 
   template <class _Iter>
   _LIBCPP_HIDE_FROM_ABI
-  static typename enable_if<__is_exactly_cpp17_input_iterator<_Iter>::value>::type
+  static typename enable_if<__has_exactly_input_iterator_category<_Iter>::value>::type
   __append_range(__path_string& __dest, _Iter __b, _Iter __e) {
     for (; __b != __e; ++__b)
       __dest.push_back(*__b);
@@ -316,7 +316,7 @@ struct _PathCVT<__path_value> {
 
   template <class _Iter>
   _LIBCPP_HIDE_FROM_ABI
-  static typename enable_if<__is_cpp17_forward_iterator<_Iter>::value>::type
+  static typename enable_if<__has_forward_iterator_category<_Iter>::value>::type
   __append_range(__path_string& __dest, _Iter __b, _Iter __e) {
     __dest.append(__b, __e);
   }
@@ -353,7 +353,7 @@ struct _PathCVT<char> {
 
   template <class _Iter>
   _LIBCPP_HIDE_FROM_ABI
-  static typename enable_if<__is_exactly_cpp17_input_iterator<_Iter>::value>::type
+  static typename enable_if<__has_exactly_input_iterator_category<_Iter>::value>::type
   __append_range(__path_string& __dest, _Iter __b, _Iter __e) {
     basic_string<char> __tmp(__b, __e);
     __append_string(__dest, __tmp);
@@ -361,7 +361,7 @@ struct _PathCVT<char> {
 
   template <class _Iter>
   _LIBCPP_HIDE_FROM_ABI
-  static typename enable_if<__is_cpp17_forward_iterator<_Iter>::value>::type
+  static typename enable_if<__has_forward_iterator_category<_Iter>::value>::type
   __append_range(__path_string& __dest, _Iter __b, _Iter __e) {
     basic_string<char> __tmp(__b, __e);
     __append_string(__dest, __tmp);
@@ -1087,14 +1087,14 @@ inline _LIBCPP_HIDE_FROM_ABI void swap(path& __lhs, path& __rhs) noexcept {
 _LIBCPP_FUNC_VIS
 size_t hash_value(const path& __p) noexcept;
 
-_LIBCPP_AVAILABILITY_FILESYSTEM_POP
+_LIBCPP_AVAILABILITY_FILESYSTEM_LIBRARY_POP
 
 _LIBCPP_END_NAMESPACE_FILESYSTEM
 
 _LIBCPP_BEGIN_NAMESPACE_STD
 
 template <>
-struct _LIBCPP_AVAILABILITY_FILESYSTEM hash<_VSTD_FS::path> : __unary_function<_VSTD_FS::path, size_t> {
+struct _LIBCPP_AVAILABILITY_FILESYSTEM_LIBRARY hash<_VSTD_FS::path> : __unary_function<_VSTD_FS::path, size_t> {
   _LIBCPP_HIDE_FROM_ABI size_t operator()(_VSTD_FS::path const& __p) const noexcept {
     return _VSTD_FS::hash_value(__p);
   }

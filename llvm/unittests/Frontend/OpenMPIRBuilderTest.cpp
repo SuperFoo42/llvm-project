@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Frontend/OpenMP/OMPConstants.h"
+#include "llvm/Frontend/OpenMP/OMPDeviceConstants.h"
 #include "llvm/Frontend/OpenMP/OMPIRBuilder.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/DIBuilder.h"
@@ -5175,6 +5176,94 @@ TEST_F(OpenMPIRBuilderTest, TargetRegion) {
   EXPECT_FALSE(verifyModule(*M, &errs()));
 }
 
+TEST_F(OpenMPIRBuilderTest, TargetRegionDevice) {
+  OpenMPIRBuilder OMPBuilder(*M);
+  OMPBuilder.setConfig(OpenMPIRBuilderConfig(true, false, false, false));
+  OMPBuilder.initialize();
+
+  F->setName("func");
+  IRBuilder<> Builder(BB);
+  OpenMPIRBuilder::LocationDescription Loc({Builder.saveIP(), DL});
+
+  StoreInst *TargetStore = nullptr;
+  llvm::SmallVector<llvm::Value *, 2> CapturedArgs = {
+      Constant::getIntegerValue(Type::getInt32Ty(Ctx), APInt(32, 0)),
+      Constant::getNullValue(Type::getInt32PtrTy(Ctx))};
+
+  auto BodyGenCB = [&](OpenMPIRBuilder::InsertPointTy AllocaIP,
+                       OpenMPIRBuilder::InsertPointTy CodeGenIP)
+      -> OpenMPIRBuilder::InsertPointTy {
+    Builder.restoreIP(CodeGenIP);
+    TargetStore = Builder.CreateStore(CapturedArgs[0], CapturedArgs[1]);
+    return Builder.saveIP();
+  };
+
+  IRBuilder<>::InsertPoint EntryIP(&F->getEntryBlock(),
+                                   F->getEntryBlock().getFirstInsertionPt());
+  TargetRegionEntryInfo EntryInfo("parent", /*DeviceID=*/1, /*FileID=*/2,
+                                  /*Line=*/3, /*Count=*/0);
+
+  Builder.restoreIP(
+      OMPBuilder.createTarget(Loc, EntryIP, EntryInfo, /*NumTeams=*/-1,
+                              /*NumThreads=*/-1, CapturedArgs, BodyGenCB));
+  Builder.CreateRetVoid();
+  OMPBuilder.finalize();
+
+  // Check outlined function
+  EXPECT_FALSE(verifyModule(*M, &errs()));
+  EXPECT_NE(TargetStore, nullptr);
+  Function *OutlinedFn = TargetStore->getFunction();
+  EXPECT_NE(F, OutlinedFn);
+
+  EXPECT_TRUE(OutlinedFn->hasWeakODRLinkage());
+  EXPECT_EQ(OutlinedFn->arg_size(), 2U);
+  EXPECT_EQ(OutlinedFn->getName(), "__omp_offloading_1_2_parent_l3");
+  EXPECT_TRUE(OutlinedFn->getArg(0)->getType()->isIntegerTy(32));
+  EXPECT_TRUE(OutlinedFn->getArg(1)->getType()->isPointerTy());
+
+  // Check entry block
+  auto &EntryBlock = OutlinedFn->getEntryBlock();
+  Instruction *Init = EntryBlock.getFirstNonPHI();
+  EXPECT_NE(Init, nullptr);
+
+  auto *InitCall = dyn_cast<CallInst>(Init);
+  EXPECT_NE(InitCall, nullptr);
+  EXPECT_EQ(InitCall->getCalledFunction()->getName(), "__kmpc_target_init");
+  EXPECT_EQ(InitCall->arg_size(), 3U);
+  EXPECT_TRUE(isa<GlobalVariable>(InitCall->getArgOperand(0)));
+  EXPECT_EQ(InitCall->getArgOperand(1),
+            ConstantInt::get(Type::getInt8Ty(Ctx), OMP_TGT_EXEC_MODE_GENERIC));
+  EXPECT_EQ(InitCall->getArgOperand(2),
+            ConstantInt::get(Type::getInt1Ty(Ctx), true));
+
+  auto *EntryBlockBranch = EntryBlock.getTerminator();
+  EXPECT_NE(EntryBlockBranch, nullptr);
+  EXPECT_EQ(EntryBlockBranch->getNumSuccessors(), 2U);
+
+  // Check user code block
+  auto *UserCodeBlock = EntryBlockBranch->getSuccessor(0);
+  EXPECT_EQ(UserCodeBlock->getName(), "user_code.entry");
+  EXPECT_EQ(UserCodeBlock->getFirstNonPHI(), TargetStore);
+
+  auto *Deinit = TargetStore->getNextNode();
+  EXPECT_NE(Deinit, nullptr);
+
+  auto *DeinitCall = dyn_cast<CallInst>(Deinit);
+  EXPECT_NE(DeinitCall, nullptr);
+  EXPECT_EQ(DeinitCall->getCalledFunction()->getName(), "__kmpc_target_deinit");
+  EXPECT_EQ(DeinitCall->arg_size(), 2U);
+  EXPECT_TRUE(isa<GlobalVariable>(DeinitCall->getArgOperand(0)));
+  EXPECT_EQ(DeinitCall->getArgOperand(1),
+            ConstantInt::get(Type::getInt8Ty(Ctx), OMP_TGT_EXEC_MODE_GENERIC));
+
+  EXPECT_TRUE(isa<ReturnInst>(DeinitCall->getNextNode()));
+
+  // Check exit block
+  auto *ExitBlock = EntryBlockBranch->getSuccessor(1);
+  EXPECT_EQ(ExitBlock->getName(), "worker.exit");
+  EXPECT_TRUE(isa<ReturnInst>(ExitBlock->getFirstNonPHI()));
+}
+
 TEST_F(OpenMPIRBuilderTest, CreateTask) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
@@ -5766,4 +5855,84 @@ TEST_F(OpenMPIRBuilderTest, OffloadEntriesInfoManager) {
       GlobalValue::WeakAnyLinkage);
   EXPECT_TRUE(InfoManager.hasDeviceGlobalVarEntryInfo("gvar"));
 }
+
+// Tests both registerTargetGlobalVariable and getAddrOfDeclareTargetVar as they
+// call each other (recursively in some cases). The test case test these
+// functions by utilising them for host code generation for declare target
+// global variables
+TEST_F(OpenMPIRBuilderTest, registerTargetGlobalVariable) {
+  OpenMPIRBuilder OMPBuilder(*M);
+  OMPBuilder.initialize();
+  OpenMPIRBuilderConfig Config(false, false, false, false);
+  OMPBuilder.setConfig(Config);
+
+  std::vector<llvm::Triple> TargetTriple;
+  TargetTriple.emplace_back("amdgcn-amd-amdhsa");
+
+  TargetRegionEntryInfo EntryInfo("", 42, 4711, 17);
+  std::vector<GlobalVariable *> RefsGathered;
+
+  std::vector<Constant *> Globals;
+  auto *IntTy = Type::getInt32Ty(Ctx);
+  for (int I = 0; I < 2; ++I) {
+    Globals.push_back(M->getOrInsertGlobal(
+        "test_data_int_" + std::to_string(I), IntTy, [&]() -> GlobalVariable * {
+          return new GlobalVariable(
+              *M, IntTy, false, GlobalValue::LinkageTypes::WeakAnyLinkage,
+              ConstantInt::get(IntTy, I), "test_data_int_" + std::to_string(I));
+        }));
+  }
+
+  OMPBuilder.registerTargetGlobalVariable(
+      OffloadEntriesInfoManager::OMPTargetGlobalVarEntryTo,
+      OffloadEntriesInfoManager::OMPTargetDeviceClauseAny, false, true,
+      EntryInfo, Globals[0]->getName(), RefsGathered, false, TargetTriple,
+      nullptr, nullptr, Globals[0]->getType(), Globals[0]);
+
+  OMPBuilder.registerTargetGlobalVariable(
+      OffloadEntriesInfoManager::OMPTargetGlobalVarEntryLink,
+      OffloadEntriesInfoManager::OMPTargetDeviceClauseAny, false, true,
+      EntryInfo, Globals[1]->getName(), RefsGathered, false, TargetTriple,
+      nullptr, nullptr, Globals[1]->getType(), Globals[1]);
+
+  llvm::OpenMPIRBuilder::EmitMetadataErrorReportFunctionTy &&ErrorReportfn =
+      [](llvm::OpenMPIRBuilder::EmitMetadataErrorKind Kind,
+         const llvm::TargetRegionEntryInfo &EntryInfo) -> void {
+    // If this is invoked, then we want to emit an error, even if it is not
+    // neccesarily the most readable, as something has went wrong. The
+    // test-suite unfortunately eats up all error output
+    ASSERT_EQ(Kind, Kind);
+  };
+
+  OMPBuilder.createOffloadEntriesAndInfoMetadata(ErrorReportfn);
+
+  // Clauses for data_int_0 with To + Any clauses for the host
+  std::vector<GlobalVariable *> OffloadEntries;
+  OffloadEntries.push_back(M->getNamedGlobal(".omp_offloading.entry_name"));
+  OffloadEntries.push_back(
+      M->getNamedGlobal(".omp_offloading.entry.test_data_int_0"));
+
+  // Clauses for data_int_1 with Link + Any clauses for the host
+  OffloadEntries.push_back(
+      M->getNamedGlobal("test_data_int_1_decl_tgt_ref_ptr"));
+  OffloadEntries.push_back(M->getNamedGlobal(".omp_offloading.entry_name.1"));
+  OffloadEntries.push_back(M->getNamedGlobal(
+      ".omp_offloading.entry.test_data_int_1_decl_tgt_ref_ptr"));
+
+  for (unsigned I = 0; I < OffloadEntries.size(); ++I)
+    EXPECT_NE(OffloadEntries[I], nullptr);
+
+  // Metadata generated for the host offload module
+  NamedMDNode *OffloadMetadata = M->getNamedMetadata("omp_offload.info");
+  EXPECT_NE(OffloadMetadata, nullptr);
+  if (OffloadMetadata) {
+    EXPECT_EQ(OffloadMetadata->getOperand(0)->getOperand(1).equalsStr(
+                  "test_data_int_0"),
+              true);
+    EXPECT_EQ(OffloadMetadata->getOperand(1)->getOperand(1).equalsStr(
+                  "test_data_int_1_decl_tgt_ref_ptr"),
+              true);
+  }
+}
+
 } // namespace

@@ -12,6 +12,7 @@ include(HandleLLVMStdlib)
 include(CheckCCompilerFlag)
 include(CheckCXXCompilerFlag)
 include(CheckSymbolExists)
+include(CheckCSourceCompiles)
 include(CMakeDependentOption)
 include(LLVMProcessSources)
 
@@ -212,6 +213,8 @@ if(${CMAKE_SYSTEM_NAME} MATCHES "AIX")
   # -fPIC does not enable the large code model for GCC on AIX but does for XL.
   if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     append("-mcmodel=large" CMAKE_CXX_FLAGS CMAKE_C_FLAGS)
+    append("-Wl,-bglink=large"
+        CMAKE_EXE_LINKER_FLAGS CMAKE_MODULE_LINKER_FLAGS CMAKE_SHARED_LINKER_FLAGS)
   elseif(CMAKE_CXX_COMPILER_ID MATCHES "XL")
     # XL generates a small number of relocations not of the large model, -bbigtoc is needed.
     append("-Wl,-bbigtoc"
@@ -593,6 +596,16 @@ if ( LLVM_COMPILER_IS_GCC_COMPATIBLE OR CMAKE_CXX_COMPILER_ID MATCHES "XL" )
   add_flag_if_supported("-Werror=date-time" WERROR_DATE_TIME)
   add_flag_if_supported("-Werror=unguarded-availability-new" WERROR_UNGUARDED_AVAILABILITY_NEW)
 endif( LLVM_COMPILER_IS_GCC_COMPATIBLE OR CMAKE_CXX_COMPILER_ID MATCHES "XL" )
+
+if ( LLVM_COMPILER_IS_GCC_COMPATIBLE )
+  # LLVM data structures like llvm::User and llvm::MDNode rely on
+  # the value of object storage persisting beyond the lifetime of the
+  # object (#24952).  This is not standard compliant and causes a runtime
+  # crash if LLVM is built with GCC and LTO enabled (#57740).  Until
+  # these bugs are fixed, we need to disable dead store eliminations
+  # based on object lifetime.
+  add_flag_if_supported("-fno-lifetime-dse" CMAKE_CXX_FLAGS)
+endif ( LLVM_COMPILER_IS_GCC_COMPATIBLE )
 
 # Modules enablement for GCC-compatible compilers:
 if ( LLVM_COMPILER_IS_GCC_COMPATIBLE AND LLVM_ENABLE_MODULES )
@@ -1290,3 +1303,10 @@ endif()
 
 set(LLVM_THIRD_PARTY_DIR  ${CMAKE_CURRENT_SOURCE_DIR}/../third-party CACHE STRING
     "Directory containing third party software used by LLVM (e.g. googletest)")
+
+if(LLVM_ENABLE_LLVM_LIBC)
+  check_library_exists(llvmlibc printf "" HAVE_LLVM_LIBC)
+  if(NOT HAVE_LLVM_LIBC)
+    message(WARNING "Unable to link against LLVM libc. LLVM will be built without linking against the LLVM libc overlay.")
+  endif()
+endif()

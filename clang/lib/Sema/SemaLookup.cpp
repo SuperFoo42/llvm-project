@@ -933,7 +933,7 @@ bool Sema::LookupBuiltin(LookupResult &R) {
         }
       }
 
-      if (DeclareRISCVVBuiltins || DeclareRISCVVectorBuiltins) {
+      if (DeclareRISCVVBuiltins || DeclareRISCVSiFiveVectorBuiltins) {
         if (!RVIntrinsicManager)
           RVIntrinsicManager = CreateRISCVIntrinsicManager(*this);
 
@@ -2424,8 +2424,9 @@ bool Sema::LookupQualifiedName(LookupResult &R, DeclContext *LookupCtx,
     bool oldVal;
     DeclContext *Context;
     // Set flag in DeclContext informing debugger that we're looking for qualified name
-    QualifiedLookupInScope(DeclContext *ctx) : Context(ctx) {
-      oldVal = ctx->setUseQualifiedLookup();
+    QualifiedLookupInScope(DeclContext *ctx)
+        : oldVal(ctx->shouldUseQualifiedLookup()), Context(ctx) {
+      ctx->setUseQualifiedLookup();
     }
     ~QualifiedLookupInScope() {
       Context->setUseQualifiedLookup(oldVal);
@@ -4148,22 +4149,21 @@ private:
     // Enumerate all of the results in this context.
     for (DeclContextLookupResult R :
          Load ? Ctx->lookups()
-              : Ctx->noload_lookups(/*PreserveInternalState=*/false)) {
-      for (auto *D : R) {
-        if (auto *ND = Result.getAcceptableDecl(D)) {
-          // Rather than visit immediately, we put ND into a vector and visit
-          // all decls, in order, outside of this loop. The reason is that
-          // Consumer.FoundDecl() may invalidate the iterators used in the two
-          // loops above.
-          DeclsToVisit.push_back(ND);
-        }
-      }
-    }
+              : Ctx->noload_lookups(/*PreserveInternalState=*/false))
+      for (auto *D : R)
+        // Rather than visit immediately, we put ND into a vector and visit
+        // all decls, in order, outside of this loop. The reason is that
+        // Consumer.FoundDecl() and LookupResult::getAcceptableDecl(D)
+        // may invalidate the iterators used in the two
+        // loops above.
+        DeclsToVisit.push_back(D);
 
-    for (auto *ND : DeclsToVisit) {
-      Consumer.FoundDecl(ND, Visited.checkHidden(ND), Ctx, InBaseClass);
-      Visited.add(ND);
-    }
+    for (auto *D : DeclsToVisit)
+      if (auto *ND = Result.getAcceptableDecl(D)) {
+        Consumer.FoundDecl(ND, Visited.checkHidden(ND), Ctx, InBaseClass);
+        Visited.add(ND);
+      }
+
     DeclsToVisit.clear();
 
     // Traverse using directives for qualified name lookup.

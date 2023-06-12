@@ -23,6 +23,7 @@
 #include <__config>
 #include <__debug>
 #include <__debug_utils/randomize_range.h>
+#include <__debug_utils/strict_weak_ordering_check.h>
 #include <__functional/operations.h>
 #include <__functional/ranges_operations.h>
 #include <__iterator/iterator_traits.h>
@@ -123,8 +124,8 @@ _LIBCPP_HIDE_FROM_ABI void __sort5(_ForwardIterator __x1, _ForwardIterator __x2,
 // The comparator being simple is a prerequisite for using the branchless optimization.
 template <class _Tp>
 struct __is_simple_comparator : false_type {};
-template <class _Tp>
-struct __is_simple_comparator<__less<_Tp>&> : true_type {};
+template <>
+struct __is_simple_comparator<__less<>&> : true_type {};
 template <class _Tp>
 struct __is_simple_comparator<less<_Tp>&> : true_type {};
 template <class _Tp>
@@ -138,7 +139,7 @@ struct __is_simple_comparator<ranges::greater&> : true_type {};
 
 template <class _Compare, class _Iter, class _Tp = typename iterator_traits<_Iter>::value_type>
 using __use_branchless_sort =
-    integral_constant<bool, __is_cpp17_contiguous_iterator<_Iter>::value && sizeof(_Tp) <= sizeof(void*) &&
+    integral_constant<bool, __libcpp_is_contiguous_iterator<_Iter>::value && sizeof(_Tp) <= sizeof(void*) &&
                                 is_arithmetic<_Tp>::value && __is_simple_comparator<_Compare>::value>;
 
 namespace __detail {
@@ -295,7 +296,7 @@ __insertion_sort_unguarded(_RandomAccessIterator const __first, _RandomAccessIte
       do {
         *__j = _Ops::__iter_move(__k);
         __j = __k;
-        _LIBCPP_ASSERT(__k != __leftmost, "Would read out of bounds, is your comparator a valid strict-weak ordering?");
+        _LIBCPP_ASSERT(__k != __leftmost, "Would read out of bounds, does your comparator satisfy the strict-weak ordering requirement?");
       } while (__comp(__t, *--__k)); // No need for bounds check due to the assumption stated above.
       *__j = std::move(__t);
     }
@@ -507,7 +508,7 @@ __bitset_partition(_RandomAccessIterator __first, _RandomAccessIterator __last, 
     // Not guarded since we know the last element is greater than the pivot.
     do {
       ++__first;
-      _LIBCPP_ASSERT(__first != __end, "Would read out of bounds, is your comparator a valid strict-weak ordering?");
+      _LIBCPP_ASSERT(__first != __end, "Would read out of bounds, does your comparator satisfy the strict-weak ordering requirement?");
     } while (!__comp(__pivot, *__first));
   } else {
     while (++__first < __last && !__comp(__pivot, *__first)) {
@@ -518,7 +519,7 @@ __bitset_partition(_RandomAccessIterator __first, _RandomAccessIterator __last, 
     // It will be always guarded because __introsort will do the median-of-three
     // before calling this.
     do {
-      _LIBCPP_ASSERT(__last != __begin, "Would read out of bounds, is your comparator a valid strict-weak ordering?");
+      _LIBCPP_ASSERT(__last != __begin, "Would read out of bounds, does your comparator satisfy the strict-weak ordering requirement?");
       --__last;
     } while (__comp(__pivot, *__last));
   }
@@ -593,7 +594,7 @@ __partition_with_equals_on_right(_RandomAccessIterator __first, _RandomAccessIte
   // this.
   do {
     ++__first;
-    _LIBCPP_ASSERT(__first != __end, "Would read out of bounds, is your comparator a valid strict-weak ordering?");
+    _LIBCPP_ASSERT(__first != __end, "Would read out of bounds, does your comparator satisfy the strict-weak ordering requirement?");
   } while (__comp(*__first, __pivot));
 
   // Find the last element less than the pivot.
@@ -603,7 +604,7 @@ __partition_with_equals_on_right(_RandomAccessIterator __first, _RandomAccessIte
   } else {
     // Guarded.
     do {
-      _LIBCPP_ASSERT(__last != __begin, "Would read out of bounds, is your comparator a valid strict-weak ordering?");
+      _LIBCPP_ASSERT(__last != __begin, "Would read out of bounds, does your comparator satisfy the strict-weak ordering requirement?");
       --__last;
     } while (!__comp(*__last, __pivot));
   }
@@ -619,10 +620,10 @@ __partition_with_equals_on_right(_RandomAccessIterator __first, _RandomAccessIte
     _Ops::iter_swap(__first, __last);
     do {
       ++__first;
-      _LIBCPP_ASSERT(__first != __end, "Would read out of bounds, is your comparator a valid strict-weak ordering?");
+      _LIBCPP_ASSERT(__first != __end, "Would read out of bounds, does your comparator satisfy the strict-weak ordering requirement?");
     } while (__comp(*__first, __pivot));
     do {
-      _LIBCPP_ASSERT(__last != __begin, "Would read out of bounds, is your comparator a valid strict-weak ordering?");
+      _LIBCPP_ASSERT(__last != __begin, "Would read out of bounds, does your comparator satisfy the strict-weak ordering requirement?");
       --__last;
     } while (!__comp(*__last, __pivot));
   }
@@ -643,14 +644,15 @@ __partition_with_equals_on_left(_RandomAccessIterator __first, _RandomAccessIter
   using _Ops = _IterOps<_AlgPolicy>;
   typedef typename iterator_traits<_RandomAccessIterator>::difference_type difference_type;
   typedef typename std::iterator_traits<_RandomAccessIterator>::value_type value_type;
-  const _RandomAccessIterator __begin = __first;            // used for bounds checking, those are not moved around
+  // TODO(LLVM18): Make __begin const, see https://reviews.llvm.org/D147089#4349748
+  _RandomAccessIterator __begin = __first;                  // used for bounds checking, those are not moved around
   const _RandomAccessIterator __end = __last; (void)__end;  //
   value_type __pivot(_Ops::__iter_move(__first));
   if (__comp(__pivot, *(__last - difference_type(1)))) {
     // Guarded.
     do {
       ++__first;
-      _LIBCPP_ASSERT(__first != __end, "Would read out of bounds, is your comparator a valid strict-weak ordering?");
+      _LIBCPP_ASSERT(__first != __end, "Would read out of bounds, does your comparator satisfy the strict-weak ordering requirement?");
     } while (!__comp(__pivot, *__first));
   } else {
     while (++__first < __last && !__comp(__pivot, *__first)) {
@@ -661,7 +663,7 @@ __partition_with_equals_on_left(_RandomAccessIterator __first, _RandomAccessIter
     // It will be always guarded because __introsort will do the
     // median-of-three before calling this.
     do {
-      _LIBCPP_ASSERT(__last != __begin, "Would read out of bounds, is your comparator a valid strict-weak ordering?");
+      _LIBCPP_ASSERT(__last != __begin, "Would read out of bounds, does your comparator satisfy the strict-weak ordering requirement?");
       --__last;
     } while (__comp(__pivot, *__last));
   }
@@ -669,10 +671,10 @@ __partition_with_equals_on_left(_RandomAccessIterator __first, _RandomAccessIter
     _Ops::iter_swap(__first, __last);
     do {
       ++__first;
-      _LIBCPP_ASSERT(__first != __end, "Would read out of bounds, is your comparator a valid strict-weak ordering?");
+      _LIBCPP_ASSERT(__first != __end, "Would read out of bounds, does your comparator satisfy the strict-weak ordering requirement?");
     } while (!__comp(__pivot, *__first));
     do {
-      _LIBCPP_ASSERT(__last != __begin, "Would read out of bounds, is your comparator a valid strict-weak ordering?");
+      _LIBCPP_ASSERT(__last != __begin, "Would read out of bounds, does your comparator satisfy the strict-weak ordering requirement?");
       --__last;
     } while (__comp(__pivot, *__last));
   }
@@ -883,7 +885,8 @@ using __sort_is_specialized_in_library = __is_any_of<
     long double>;
 
 template <class _AlgPolicy, class _Type, __enable_if_t<__sort_is_specialized_in_library<_Type>::value, int> = 0>
-_LIBCPP_HIDE_FROM_ABI void __sort_dispatch(_Type* __first, _Type* __last, __less<_Type>& __comp) {
+_LIBCPP_HIDE_FROM_ABI void __sort_dispatch(_Type* __first, _Type* __last, __less<>&) {
+  __less<_Type> __comp;
   std::__sort<__less<_Type>&, _Type*>(__first, __last, __comp);
 }
 
@@ -920,6 +923,7 @@ void __sort_impl(_RandomAccessIterator __first, _RandomAccessIterator __last, _C
   } else {
     std::__sort_dispatch<_AlgPolicy>(std::__unwrap_iter(__first), std::__unwrap_iter(__last), __comp);
   }
+  std::__check_strict_weak_ordering_sorted(std::__unwrap_iter(__first), std::__unwrap_iter(__last), __comp);
 }
 
 template <class _RandomAccessIterator, class _Comp>
@@ -931,7 +935,7 @@ void sort(_RandomAccessIterator __first, _RandomAccessIterator __last, _Comp __c
 template <class _RandomAccessIterator>
 inline _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_SINCE_CXX20
 void sort(_RandomAccessIterator __first, _RandomAccessIterator __last) {
-  std::sort(__first, __last, __less<typename iterator_traits<_RandomAccessIterator>::value_type>());
+  std::sort(__first, __last, __less<>());
 }
 
 _LIBCPP_END_NAMESPACE_STD

@@ -999,7 +999,9 @@ fir::ExtendedValue fir::factory::createStringLiteral(fir::FirOpBuilder &builder,
           auto stringLitOp = builder.createStringLitOp(loc, str);
           builder.create<fir::HasValueOp>(loc, stringLitOp);
         },
-        builder.createLinkOnceLinkage());
+        builder.createInternalLinkage());
+  // TODO: This can be changed to linkonce linkage once we have support for
+  // generating comdat sections
   auto addr = builder.create<fir::AddrOfOp>(loc, global.resultType(),
                                             global.getSymbol());
   auto len = builder.createIntegerConstant(
@@ -1466,6 +1468,17 @@ fir::BoxValue fir::factory::createBoxValue(fir::FirOpBuilder &builder,
         explicitTypeParams.emplace_back(box.getLen());
       },
       [&](const fir::MutableBoxValue &x) {
+        if (x.rank() > 0) {
+          // The resulting box lbounds must be coming from the mutable box.
+          fir::ExtendedValue boxVal =
+              fir::factory::genMutableBoxRead(builder, loc, x);
+          // Make sure we do not recurse infinitely.
+          if (boxVal.getBoxOf<fir::MutableBoxValue>())
+            fir::emitFatalError(loc, "mutable box read cannot be mutable box");
+          fir::BoxValue box =
+              fir::factory::createBoxValue(builder, loc, boxVal);
+          lbounds.append(box.getLBounds().begin(), box.getLBounds().end());
+        }
         explicitTypeParams.append(x.nonDeferredLenParams().begin(),
                                   x.nonDeferredLenParams().end());
       },

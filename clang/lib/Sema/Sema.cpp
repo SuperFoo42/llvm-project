@@ -219,7 +219,7 @@ Sema::Sema(Preprocessor &pp, ASTContext &ctxt, ASTConsumer &consumer,
       ArgumentPackSubstitutionIndex(-1), CurrentInstantiationScope(nullptr),
       DisableTypoCorrection(false), TyposCorrected(0), AnalysisWarnings(*this),
       ThreadSafetyDeclCache(nullptr), VarDataSharingAttributesStack(nullptr),
-      CurScope(nullptr), Ident_super(nullptr), Ident___float128(nullptr) {
+      CurScope(nullptr), Ident_super(nullptr) {
   assert(pp.TUKind == TUKind);
   TUScope = nullptr;
   isConstantEvaluatedOverride = false;
@@ -1184,7 +1184,7 @@ void Sema::ActOnEndOfTranslationUnit() {
         !(isa<FunctionDecl>(PrevDecl) || isa<VarDecl>(PrevDecl)))
       for (const auto &WI : WeakIDs.second)
         Diag(WI.getLocation(), diag::warn_attribute_wrong_decl_type)
-            << "'weak'" << ExpectedVariableOrFunction;
+            << "'weak'" << /*isRegularKeyword=*/0 << ExpectedVariableOrFunction;
     else
       for (const auto &WI : WeakIDs.second)
         Diag(WI.getLocation(), diag::warn_weak_identifier_undeclared)
@@ -1425,6 +1425,8 @@ void Sema::ActOnEndOfTranslationUnit() {
       }
     }
   }
+
+  AnalysisWarnings.IssueWarnings(Context.getTranslationUnitDecl());
 
   // Check we've noticed that we're no longer parsing the initializer for every
   // variable. If we miss cases, then at best we have a performance issue and
@@ -2681,12 +2683,6 @@ IdentifierInfo *Sema::getSuperIdentifier() const {
   if (!Ident_super)
     Ident_super = &Context.Idents.get("super");
   return Ident_super;
-}
-
-IdentifierInfo *Sema::getFloat128Identifier() const {
-  if (!Ident___float128)
-    Ident___float128 = &Context.Idents.get("__float128");
-  return Ident___float128;
 }
 
 void Sema::PushCapturedRegionScope(Scope *S, CapturedDecl *CD, RecordDecl *RD,

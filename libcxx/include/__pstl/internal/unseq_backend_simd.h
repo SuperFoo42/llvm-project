@@ -98,52 +98,6 @@ __simd_or(_Index __first, _DifferenceType __n, _Pred __pred) noexcept
     return false;
 }
 
-template <class _Index, class _DifferenceType, class _Compare>
-_LIBCPP_HIDE_FROM_ABI _Index
-__simd_first(_Index __first, _DifferenceType __begin, _DifferenceType __end, _Compare __comp) noexcept
-{
-    // Experiments show good block sizes like this
-    const _DifferenceType __block_size = 8;
-    alignas(__lane_size) _DifferenceType __lane[__block_size] = {0};
-    while (__end - __begin >= __block_size)
-    {
-        _DifferenceType __found = 0;
-            _PSTL_PRAGMA_SIMD_REDUCTION(|
-                                        : __found) for (_DifferenceType __i = __begin; __i < __begin + __block_size;
-                                                        ++__i)
-        {
-            const _DifferenceType __t = __comp(__first, __i);
-            __lane[__i - __begin] = __t;
-            __found |= __t;
-        }
-        if (__found)
-        {
-            _DifferenceType __i;
-            // This will vectorize
-            for (__i = 0; __i < __block_size; ++__i)
-            {
-                if (__lane[__i])
-                {
-                    break;
-                }
-            }
-            return __first + __begin + __i;
-        }
-        __begin += __block_size;
-    }
-
-    //Keep remainder scalar
-    while (__begin != __end)
-    {
-        if (__comp(__first, __begin))
-        {
-            return __first + __begin;
-        }
-        ++__begin;
-    }
-    return __first + __end;
-}
-
 template <class _Index1, class _DifferenceType, class _Index2, class _Pred>
 _LIBCPP_HIDE_FROM_ABI std::pair<_Index1, _Index2>
 __simd_first(_Index1 __first1, _DifferenceType __n, _Index2 __first2, _Pred __pred) noexcept
@@ -323,17 +277,6 @@ __simd_partition_by_mask(_InputIterator __first, _DifferenceType __n, _OutputIte
     }
 }
 
-template <class _Index, class _DifferenceType, class _Tp>
-_LIBCPP_HIDE_FROM_ABI _Index
-__simd_fill_n(_Index __first, _DifferenceType __n, const _Tp& __value) noexcept
-{
-    _PSTL_USE_NONTEMPORAL_STORES_IF_ALLOWED
-    _PSTL_PRAGMA_SIMD
-    for (_DifferenceType __i = 0; __i < __n; ++__i)
-        __first[__i] = __value;
-    return __first + __n;
-}
-
 template <class _Index, class _DifferenceType, class _Generator>
 _LIBCPP_HIDE_FROM_ABI _Index
 __simd_generate_n(_Index __first, _DifferenceType __size, _Generator __g) noexcept
@@ -400,71 +343,6 @@ __simd_adjacent_find(_Index __first, _Index __last, _BinaryPredicate __pred, boo
 template <typename _Tp, typename _BinaryOperation>
 using is_arithmetic_plus = std::integral_constant<bool, std::is_arithmetic<_Tp>::value &&
                                                             std::is_same<_BinaryOperation, std::plus<_Tp>>::value>;
-
-template <typename _DifferenceType, typename _Tp, typename _BinaryOperation, typename _UnaryOperation>
-_LIBCPP_HIDE_FROM_ABI typename std::enable_if<is_arithmetic_plus<_Tp, _BinaryOperation>::value, _Tp>::type
-__simd_transform_reduce(_DifferenceType __n, _Tp __init, _BinaryOperation, _UnaryOperation __f) noexcept
-{
-    _PSTL_PRAGMA_SIMD_REDUCTION(+ : __init)
-    for (_DifferenceType __i = 0; __i < __n; ++__i)
-        __init += __f(__i);
-    return __init;
-}
-
-template <typename _Size, typename _Tp, typename _BinaryOperation, typename _UnaryOperation>
-_LIBCPP_HIDE_FROM_ABI typename std::enable_if<!is_arithmetic_plus<_Tp, _BinaryOperation>::value, _Tp>::type
-__simd_transform_reduce(_Size __n, _Tp __init, _BinaryOperation __binary_op, _UnaryOperation __f) noexcept
-{
-    const _Size __block_size = __lane_size / sizeof(_Tp);
-    if (__n > 2 * __block_size && __block_size > 1)
-    {
-        alignas(__lane_size) char __lane_buffer[__lane_size];
-        _Tp* __lane = reinterpret_cast<_Tp*>(__lane_buffer);
-
-        // initializer
-        _PSTL_PRAGMA_SIMD
-        for (_Size __i = 0; __i < __block_size; ++__i)
-        {
-            ::new (__lane + __i) _Tp(__binary_op(__f(__i), __f(__block_size + __i)));
-        }
-        // main loop
-        _Size __i = 2 * __block_size;
-        const _Size __last_iteration = __block_size * (__n / __block_size);
-        for (; __i < __last_iteration; __i += __block_size)
-        {
-            _PSTL_PRAGMA_SIMD
-            for (_Size __j = 0; __j < __block_size; ++__j)
-            {
-                __lane[__j] = __binary_op(__lane[__j], __f(__i + __j));
-            }
-        }
-        // remainder
-        _PSTL_PRAGMA_SIMD
-        for (_Size __j = 0; __j < __n - __last_iteration; ++__j)
-        {
-            __lane[__j] = __binary_op(__lane[__j], __f(__last_iteration + __j));
-        }
-        // combiner
-        for (_Size __j = 0; __j < __block_size; ++__j)
-        {
-            __init = __binary_op(__init, __lane[__j]);
-        }
-        // destroyer
-        _PSTL_PRAGMA_SIMD
-        for (_Size __j = 0; __j < __block_size; ++__j)
-        {
-            __lane[__j].~_Tp();
-        }
-    }
-    else
-    {
-        for (_Size __i = 0; __i < __n; ++__i)
-        {
-            __init = __binary_op(__init, __f(__i));
-        }
-    }
-    return __init;
-}
 
 // Exclusive scan for "+" and arithmetic types
 template <class _InputIterator, class _Size, class _OutputIterator, class _UnaryOperation, class _Tp,

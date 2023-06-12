@@ -302,8 +302,7 @@ SDValue VectorLegalizer::LegalizeOp(SDValue Op) {
       ISD::CondCode CCCode = cast<CondCodeSDNode>(Node->getOperand(3))->get();
       Action = TLI.getCondCodeAction(CCCode, OpVT);
       if (Action == TargetLowering::Legal)
-        Action =
-            TLI.getOperationAction(Node->getOpcode(), Node->getValueType(0));
+        Action = TLI.getOperationAction(Node->getOpcode(), OpVT);
     } else {
       Action = TLI.getOperationAction(Node->getOpcode(), ValVT);
     }
@@ -378,6 +377,7 @@ SDValue VectorLegalizer::LegalizeOp(SDValue Op) {
   case ISD::FSQRT:
   case ISD::FSIN:
   case ISD::FCOS:
+  case ISD::FLDEXP:
   case ISD::FPOWI:
   case ISD::FPOW:
   case ISD::FLOG:
@@ -464,7 +464,7 @@ SDValue VectorLegalizer::LegalizeOp(SDValue Op) {
     ISD::CondCode CCCode = cast<CondCodeSDNode>(Node->getOperand(2))->get();
     Action = TLI.getCondCodeAction(CCCode, OpVT);
     if (Action == TargetLowering::Legal)
-      Action = TLI.getOperationAction(Node->getOpcode(), Node->getValueType(0));
+      Action = TLI.getOperationAction(Node->getOpcode(), OpVT);
     break;
   }
 

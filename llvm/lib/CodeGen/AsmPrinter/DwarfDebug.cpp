@@ -704,8 +704,8 @@ static void interpretValues(const MachineInstr *CurMI,
     if (MI.isDebugInstr())
       return;
 
-    for (const MachineOperand &MO : MI.operands()) {
-      if (MO.isReg() && MO.isDef() && MO.getReg().isPhysical()) {
+    for (const MachineOperand &MO : MI.all_defs()) {
+      if (MO.getReg().isPhysical()) {
         for (auto &FwdReg : ForwardedRegWorklist)
           if (TRI.regsOverlap(FwdReg.first, MO.getReg()))
             Defs.insert(FwdReg.first);
@@ -1091,6 +1091,13 @@ DwarfDebug::getOrCreateDwarfCompileUnit(const DICompileUnit *DIUnit) {
   if (auto *CU = CUMap.lookup(DIUnit))
     return *CU;
 
+  if (useSplitDwarf() &&
+      !shareAcrossDWOCUs() &&
+      (!DIUnit->getSplitDebugInlining() ||
+       DIUnit->getEmissionKind() == DICompileUnit::FullDebug) &&
+      !CUMap.empty()) {
+    return *CUMap.begin()->second;
+  }
   CompilationDir = DIUnit->getDirectory();
 
   auto OwnedUnit = std::make_unique<DwarfCompileUnit>(
@@ -1294,6 +1301,8 @@ void DwarfDebug::finalizeModuleInfo() {
   if (CUMap.size() > 1)
     DWOName = Asm->TM.Options.MCOptions.SplitDwarfFile;
 
+  bool HasEmittedSplitCU = false;
+
   // Handle anything that needs to be done on a per-unit basis after
   // all other generation.
   for (const auto &P : CUMap) {
@@ -1312,6 +1321,10 @@ void DwarfDebug::finalizeModuleInfo() {
     bool HasSplitUnit = SkCU && !TheCU.getUnitDie().children().empty();
 
     if (HasSplitUnit) {
+      (void)HasEmittedSplitCU;
+      assert((shareAcrossDWOCUs() || !HasEmittedSplitCU) &&
+             "Multiple CUs emitted into a single dwo file");
+      HasEmittedSplitCU = true;
       dwarf::Attribute attrDWOName = getDwarfVersion() >= 5
                                          ? dwarf::DW_AT_dwo_name
                                          : dwarf::DW_AT_GNU_dwo_name;
@@ -1549,13 +1562,24 @@ void DwarfDebug::collectVariableInfoFromMFTable(
     ensureAbstractEntityIsCreatedIfScoped(TheCU, Var.first, Scope->getScopeNode());
     auto RegVar = std::make_unique<DbgVariable>(
                     cast<DILocalVariable>(Var.first), Var.second);
-    RegVar->initializeMMI(VI.Expr, VI.Slot);
+    if (VI.inStackSlot())
+      RegVar->initializeMMI(VI.Expr, VI.getStackSlot());
+    else {
+      MachineLocation MLoc(VI.getEntryValueRegister(), /*IsIndirect*/ true);
+      auto LocEntry = DbgValueLocEntry(MLoc);
+      RegVar->initializeDbgValue(DbgValueLoc(VI.Expr, LocEntry));
+    }
     LLVM_DEBUG(dbgs() << "Created DbgVariable for " << VI.Var->getName()
                       << "\n");
 
-    if (DbgVariable *DbgVar = MFVars.lookup(Var))
-      DbgVar->addMMIEntry(*RegVar);
-    else if (InfoHolder.addScopeVariable(Scope, RegVar.get())) {
+    if (DbgVariable *DbgVar = MFVars.lookup(Var)) {
+      if (DbgVar->getValueLoc())
+        LLVM_DEBUG(dbgs() << "Dropping repeated entry value debug info for "
+                             "variable "
+                          << VI.Var->getName() << "\n");
+      else
+        DbgVar->addMMIEntry(*RegVar);
+    } else if (InfoHolder.addScopeVariable(Scope, RegVar.get())) {
       MFVars.insert({Var, RegVar.get()});
       ConcreteEntities.push_back(std::move(RegVar));
     }
@@ -2253,7 +2277,7 @@ void DwarfDebug::endFunctionImpl(const MachineFunction *MF) {
 
   LexicalScope *FnScope = LScopes.getCurrentFunctionScope();
   assert(!FnScope || SP == FnScope->getScopeNode());
-  DwarfCompileUnit &TheCU = *CUMap.lookup(SP->getUnit());
+  DwarfCompileUnit &TheCU = getOrCreateDwarfCompileUnit(SP->getUnit());
   if (TheCU.getCUNode()->isDebugDirectivesOnly()) {
     PrevLabel = nullptr;
     CurFn = nullptr;
@@ -3572,11 +3596,9 @@ dwarf::Form DwarfDebug::getDwarfSectionOffsetForm() const {
 }
 
 const MCSymbol *DwarfDebug::getSectionLabel(const MCSection *S) {
-  auto I = SectionLabels.find(S);
-  if (I == SectionLabels.end())
-    return nullptr;
-  return I->second;
+  return SectionLabels.lookup(S);
 }
+
 void DwarfDebug::insertSectionLabel(const MCSymbol *S) {
   if (SectionLabels.insert(std::make_pair(&S->getSection(), S)).second)
     if (useSplitDwarf() || getDwarfVersion() >= 5)
