@@ -404,13 +404,13 @@ struct GenerateLoopNest {
                        bodyBuilderFn,
                    ArrayRef<linalg::ProcInfo> procInfo = {});
 
-  static void doit(OpBuilder &b, Location loc, ArrayRef<Range> loopRanges,
+/*  static void doit(OpBuilder &b, Location loc, ArrayRef<Range> loopRanges,
                    LinalgOp linalgOp, ArrayRef<Attribute> iteratorTypes,
                    function_ref<scf::ValueVector(OpBuilder &, Location,
                                                  ValueRange, llvm::SmallDenseMap<OpOperand *, Value>)>
                        bodyBuilderFn,
-                   Optional<LinalgLoopDistributionOptions> = Optional<LinalgLoopDistributionOptions>(),
-                   ArrayRef<StringRef> distributionTypes = {});
+                   std::optional<LinalgLoopDistributionOptions> = std::optional<LinalgLoopDistributionOptions>(),
+                   ArrayRef<StringRef> distributionTypes = {});*/
 };
 
 /// Returns an attribute list that excludes pre-defined attributes.
