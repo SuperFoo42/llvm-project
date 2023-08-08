@@ -28,6 +28,7 @@
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Transforms/InliningUtils.h"
 #include "llvm/ADT/TypeSwitch.h"
+#include "llvm/Support/ErrorHandling.h"
 
 using namespace mlir;
 using namespace mlir::gpu;
@@ -42,20 +43,68 @@ int64_t GPUBlockMappingAttr::getMappingId() const {
   return static_cast<int64_t>(getBlock());
 }
 
+bool GPUBlockMappingAttr::isLinearMapping() const {
+  return getMappingId() >= static_cast<int64_t>(MappingId::LinearDim0);
+}
+
+int64_t GPUBlockMappingAttr::getRelativeIndex() const {
+  return isLinearMapping()
+             ? getMappingId() - static_cast<int64_t>(MappingId::LinearDim0)
+             : getMappingId();
+}
+
+int64_t GPUWarpgroupMappingAttr::getMappingId() const {
+  return static_cast<int64_t>(getWarpgroup());
+}
+
+bool GPUWarpgroupMappingAttr::isLinearMapping() const {
+  return getMappingId() >= static_cast<int64_t>(MappingId::LinearDim0);
+}
+
+int64_t GPUWarpgroupMappingAttr::getRelativeIndex() const {
+  return isLinearMapping()
+             ? getMappingId() - static_cast<int64_t>(MappingId::LinearDim0)
+             : getMappingId();
+}
+
 int64_t GPUWarpMappingAttr::getMappingId() const {
   return static_cast<int64_t>(getWarp());
 }
 
-int64_t GPULinearIdMappingAttr::getMappingId() const {
-  return static_cast<int64_t>(getLinearId());
+bool GPUWarpMappingAttr::isLinearMapping() const {
+  return getMappingId() >= static_cast<int64_t>(MappingId::LinearDim0);
+}
+
+int64_t GPUWarpMappingAttr::getRelativeIndex() const {
+  return isLinearMapping()
+             ? getMappingId() - static_cast<int64_t>(MappingId::LinearDim0)
+             : getMappingId();
 }
 
 int64_t GPUThreadMappingAttr::getMappingId() const {
   return static_cast<int64_t>(getThread());
 }
 
+bool GPUThreadMappingAttr::isLinearMapping() const {
+  return getMappingId() >= static_cast<int64_t>(MappingId::LinearDim0);
+}
+
+int64_t GPUThreadMappingAttr::getRelativeIndex() const {
+  return isLinearMapping()
+             ? getMappingId() - static_cast<int64_t>(MappingId::LinearDim0)
+             : getMappingId();
+}
+
 int64_t GPUMemorySpaceMappingAttr::getMappingId() const {
   return static_cast<int64_t>(getAddressSpace());
+}
+
+bool GPUMemorySpaceMappingAttr::isLinearMapping() const {
+  llvm_unreachable("GPUMemorySpaceMappingAttr does not support linear mapping");
+}
+
+int64_t GPUMemorySpaceMappingAttr::getRelativeIndex() const {
+  llvm_unreachable("GPUMemorySpaceMappingAttr does not support relative index");
 }
 
 //===----------------------------------------------------------------------===//
@@ -146,9 +195,9 @@ struct GPUInlinerInterface : public DialectInlinerInterface {
 void GPUDialect::initialize() {
   addTypes<AsyncTokenType>();
   addTypes<MMAMatrixType>();
-  addTypes<SparseEnvHandleType>();
   addTypes<SparseDnTensorHandleType>();
   addTypes<SparseSpMatHandleType>();
+  addTypes<SparseSpGEMMOpHandleType>();
   addOperations<
 #define GET_OP_LIST
 #include "mlir/Dialect/GPU/IR/GPUOps.cpp.inc"
@@ -162,12 +211,12 @@ void GPUDialect::initialize() {
 
 static std::string getSparseHandleKeyword(SparseHandleKind kind) {
   switch (kind) {
-  case SparseHandleKind::Env:
-    return "sparse.env_handle";
   case SparseHandleKind::DnTensor:
     return "sparse.dntensor_handle";
   case SparseHandleKind::SpMat:
     return "sparse.spmat_handle";
+  case SparseHandleKind::SpGEMMOp:
+    return "sparse.spgemmop_handle";
   }
   llvm_unreachable("unknown sparse handle kind");
   return "";
@@ -216,12 +265,12 @@ Type GPUDialect::parseType(DialectAsmParser &parser) const {
                                      shape, elementType, operand);
   }
 
-  if (keyword == getSparseHandleKeyword(SparseHandleKind::Env))
-    return SparseEnvHandleType::get(context);
   if (keyword == getSparseHandleKeyword(SparseHandleKind::DnTensor))
     return SparseDnTensorHandleType::get(context);
   if (keyword == getSparseHandleKeyword(SparseHandleKind::SpMat))
     return SparseSpMatHandleType::get(context);
+  if (keyword == getSparseHandleKeyword(SparseHandleKind::SpGEMMOp))
+    return SparseSpGEMMOpHandleType::get(context);
 
   parser.emitError(parser.getNameLoc(), "unknown gpu type: " + keyword);
   return Type();
@@ -231,13 +280,14 @@ Type GPUDialect::parseType(DialectAsmParser &parser) const {
 void GPUDialect::printType(Type type, DialectAsmPrinter &os) const {
   TypeSwitch<Type>(type)
       .Case<AsyncTokenType>([&](Type) { os << "async.token"; })
-      .Case<SparseEnvHandleType>(
-          [&](Type) { os << getSparseHandleKeyword(SparseHandleKind::Env); })
       .Case<SparseDnTensorHandleType>([&](Type) {
         os << getSparseHandleKeyword(SparseHandleKind::DnTensor);
       })
       .Case<SparseSpMatHandleType>(
           [&](Type) { os << getSparseHandleKeyword(SparseHandleKind::SpMat); })
+      .Case<SparseSpGEMMOpHandleType>([&](Type) {
+        os << getSparseHandleKeyword(SparseHandleKind::SpGEMMOp);
+      })
       .Case<MMAMatrixType>([&](MMAMatrixType fragTy) {
         os << "mma_matrix<";
         auto shape = fragTy.getShape();
@@ -1553,17 +1603,6 @@ void MemcpyOp::getCanonicalizationPatterns(RewritePatternSet &results,
 // GPU_SubgroupMmaLoadMatrixOp
 //===----------------------------------------------------------------------===//
 
-/// Return true if the last dimension of the MemRefType has unit stride. Also
-/// return true for memrefs with no strides.
-static bool isLastMemrefDimUnitStride(MemRefType type) {
-  int64_t offset;
-  SmallVector<int64_t> strides;
-  if (failed(getStridesAndOffset(type, strides, offset))) {
-    return false;
-  }
-  return strides.back() == 1;
-}
-
 LogicalResult SubgroupMmaLoadMatrixOp::verify() {
   auto srcType = getSrcMemref().getType();
   auto resType = getRes().getType();
@@ -1746,7 +1785,7 @@ struct SimplifyDimOfAllocOp : public OpRewritePattern<memref::DimOp> {
 
   LogicalResult matchAndRewrite(memref::DimOp dimOp,
                                 PatternRewriter &rewriter) const override {
-    auto index = dimOp.getIndex().getDefiningOp<arith::ConstantIndexOp>();
+    std::optional<int64_t> index = dimOp.getConstantIndex();
     if (!index)
       return failure();
 

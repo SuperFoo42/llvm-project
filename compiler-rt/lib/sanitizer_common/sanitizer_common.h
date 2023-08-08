@@ -117,6 +117,7 @@ void *MmapAlignedOrDieOnFatalError(uptr size, uptr alignment,
 // unaccessible memory.
 bool MprotectNoAccess(uptr addr, uptr size);
 bool MprotectReadOnly(uptr addr, uptr size);
+bool MprotectReadWrite(uptr addr, uptr size);
 
 void MprotectMallocZones(void *addr, int prot);
 
@@ -1082,27 +1083,6 @@ inline u32 GetNumberOfCPUsCached() {
     NumberOfCPUsCached = GetNumberOfCPUs();
   return NumberOfCPUsCached;
 }
-
-template <typename T>
-class ArrayRef {
- public:
-  ArrayRef() {}
-  ArrayRef(const T *begin, const T *end) : begin_(begin), end_(end) {}
-
-  template <typename C>
-  ArrayRef(const C &src) : ArrayRef(src.data(), src.data() + src.size()) {}
-
-  const T *begin() const { return begin_; }
-  const T *end() const { return end_; }
-
-  bool empty() const { return begin_ == end_; }
-
-  uptr size() const { return end_ - begin_; }
-
- private:
-  const T *begin_ = nullptr;
-  const T *end_ = nullptr;
-};
 
 }  // namespace __sanitizer
 

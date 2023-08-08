@@ -14,6 +14,7 @@
 #include <__algorithm/replace_copy.h>
 #include <__availability>
 #include <__config>
+#include <__functional/hash.h>
 #include <__functional/unary_function.h>
 #include <__fwd/hash.h>
 #include <__iterator/back_insert_iterator.h>
@@ -222,10 +223,8 @@ typedef char __path_value;
 #endif
 
 #if defined(_LIBCPP_WIN32API)
-_LIBCPP_FUNC_VIS
-size_t __wide_to_char(const wstring&, char*, size_t);
-_LIBCPP_FUNC_VIS
-size_t __char_to_wide(const string&, wchar_t*, size_t);
+_LIBCPP_EXPORTED_FROM_ABI size_t __wide_to_char(const wstring&, char*, size_t);
+_LIBCPP_EXPORTED_FROM_ABI size_t __char_to_wide(const string&, wchar_t*, size_t);
 #endif
 
 template <class _ECharT>
@@ -444,7 +443,7 @@ struct _PathExport<char8_t> {
 #endif /* !_LIBCPP_HAS_NO_CHAR8_T */
 #endif /* _LIBCPP_WIN32API */
 
-class _LIBCPP_TYPE_VIS path {
+class _LIBCPP_EXPORTED_FROM_ABI path {
   template <class _SourceOrIter, class _Tp = path&>
   using _EnableIfPathable =
       typename enable_if<__is_pathable<_SourceOrIter>::value, _Tp>::type;
@@ -1034,7 +1033,7 @@ public:
   }
 
   // iterators
-  class _LIBCPP_TYPE_VIS iterator;
+  class _LIBCPP_EXPORTED_FROM_ABI iterator;
   typedef iterator const_iterator;
 
   iterator begin() const;
@@ -1084,8 +1083,7 @@ inline _LIBCPP_HIDE_FROM_ABI void swap(path& __lhs, path& __rhs) noexcept {
   __lhs.swap(__rhs);
 }
 
-_LIBCPP_FUNC_VIS
-size_t hash_value(const path& __p) noexcept;
+_LIBCPP_EXPORTED_FROM_ABI size_t hash_value(const path& __p) noexcept;
 
 _LIBCPP_AVAILABILITY_FILESYSTEM_LIBRARY_POP
 

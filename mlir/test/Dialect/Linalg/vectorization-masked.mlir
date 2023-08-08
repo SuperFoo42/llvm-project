@@ -1,4 +1,4 @@
-// RUN: mlir-opt %s -test-transform-dialect-interpreter -split-input-file --verify-diagnostics | FileCheck %s
+// RUN: mlir-opt %s -test-transform-dialect-interpreter -split-input-file | FileCheck %s
 
 func.func @vectorize_dynamic_identity(%arg0: tensor<?xf32>,
                                       %arg1: tensor<?xf32>,
@@ -405,7 +405,7 @@ transform.sequence failures(propagate) {
 
 // -----
 
-//       CHECK: #[[MAP:.+]] = affine_map<()[s0, s1] -> (s1 + s0)>
+//       CHECK: #[[MAP:.+]] = affine_map<()[s0, s1] -> (s0 + s1)>
 //       CHECK: func @test_masked_vectorize_dynamic_pad
 func.func @test_masked_vectorize_dynamic_pad(
   %0 : tensor<?x?xf32>, %h0 : index, %h1 : index)
@@ -485,17 +485,3 @@ transform.sequence failures(propagate) {
   transform.structured.masked_vectorize %0 vector_sizes [8, 16, 4] : !transform.any_op
 }
 
-// -----
-
-func.func @vectorize_dynamic_matmul_scalable(%A: memref<?x?xf32>, %B: memref<?x?xf32>, %C: memref<?x?xf32>) {
-  // expected-warning @+1 {{Scalable vectorization is not supported yet}}
-  linalg.matmul ins(%A, %B: memref<?x?xf32>, memref<?x?xf32>)
-            outs(%C: memref<?x?xf32>)
-  return
-}
-
-transform.sequence failures(propagate) {
-^bb1(%arg1: !transform.any_op):
-  %0 = transform.structured.match ops{["linalg.matmul"]} in %arg1 : (!transform.any_op) -> !transform.any_op
-  transform.structured.masked_vectorize %0 vector_sizes [8, 16, [4]] : !transform.any_op
-}

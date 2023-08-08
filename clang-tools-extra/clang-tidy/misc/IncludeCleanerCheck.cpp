@@ -34,6 +34,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/Path.h"
 #include "llvm/Support/Regex.h"
 #include <optional>
 #include <string>
@@ -45,7 +46,7 @@ namespace clang::tidy::misc {
 
 namespace {
 struct MissingIncludeInfo {
-  SourceLocation SymRefLocation;
+  include_cleaner::SymbolReference SymRef;
   include_cleaner::Header Missing;
 };
 } // namespace
@@ -134,7 +135,7 @@ void IncludeCleanerCheck::check(const MatchFinder::MatchResult &Result) {
              if (!Satisfied && !Providers.empty() &&
                  Ref.RT == include_cleaner::RefType::Explicit &&
                  !shouldIgnore(Providers.front()))
-               Missing.push_back({Ref.RefLocation, Providers.front()});
+               Missing.push_back({Ref, Providers.front()});
            });
 
   std::vector<const include_cleaner::Include *> Unused;
@@ -142,11 +143,11 @@ void IncludeCleanerCheck::check(const MatchFinder::MatchResult &Result) {
        RecordedPreprocessor.Includes.all()) {
     if (Used.contains(&I) || !I.Resolved)
       continue;
-    if (RecordedPI.shouldKeep(I.Line))
+    if (RecordedPI.shouldKeep(*I.Resolved))
       continue;
     // Check if main file is the public interface for a private header. If so
     // we shouldn't diagnose it as unused.
-    if (auto PHeader = RecordedPI.getPublic(I.Resolved); !PHeader.empty()) {
+    if (auto PHeader = RecordedPI.getPublic(*I.Resolved); !PHeader.empty()) {
       PHeader = PHeader.trim("<>\"");
       // Since most private -> public mappings happen in a verbatim way, we
       // check textually here. This might go wrong in presence of symlinks or
@@ -155,9 +156,10 @@ void IncludeCleanerCheck::check(const MatchFinder::MatchResult &Result) {
         continue;
     }
 
-    if (llvm::none_of(IgnoreHeadersRegex,
-                      [Resolved = I.Resolved->tryGetRealPathName()](
-                          const llvm::Regex &R) { return R.match(Resolved); }))
+    if (llvm::none_of(
+            IgnoreHeadersRegex,
+            [Resolved = (*I.Resolved).getFileEntry().tryGetRealPathName()](
+                const llvm::Regex &R) { return R.match(Resolved); }))
       Unused.push_back(&I);
   }
 
@@ -171,7 +173,8 @@ void IncludeCleanerCheck::check(const MatchFinder::MatchResult &Result) {
 
   for (const auto *Inc : Unused) {
     diag(Inc->HashLocation, "included header %0 is not used directly")
-        << Inc->quote()
+        << llvm::sys::path::filename(Inc->Spelled,
+                                     llvm::sys::path::Style::posix)
         << FixItHint::CreateRemoval(CharSourceRange::getCharRange(
                SM->translateLineCol(SM->getMainFileID(), Inc->Line, 1),
                SM->translateLineCol(SM->getMainFileID(), Inc->Line + 1, 1)));
@@ -190,9 +193,9 @@ void IncludeCleanerCheck::check(const MatchFinder::MatchResult &Result) {
     if (auto Replacement =
             HeaderIncludes.insert(llvm::StringRef{Spelling}.trim("\"<>"),
                                   Angled, tooling::IncludeDirective::Include))
-      diag(SM->getSpellingLoc(Inc.SymRefLocation),
-           "no header providing %0 is directly included")
-          << Spelling
+      diag(SM->getSpellingLoc(Inc.SymRef.RefLocation),
+           "no header providing \"%0\" is directly included")
+          << Inc.SymRef.Target.name()
           << FixItHint::CreateInsertion(
                  SM->getComposedLoc(SM->getMainFileID(),
                                     Replacement->getOffset()),

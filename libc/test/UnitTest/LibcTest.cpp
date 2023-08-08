@@ -15,6 +15,17 @@
 
 #if __STDC_HOSTED__
 #include <time.h>
+#elif defined(LIBC_TARGET_ARCH_IS_GPU)
+#include "src/__support/GPU/utils.h"
+static long clock() { return __llvm_libc::gpu::fixed_frequency_clock(); }
+#if defined(LIBC_TARGET_ARCH_IS_NVPTX)
+#define CLOCKS_PER_SEC 1000000000UL
+#else
+// The AMDGPU loader needs to initialize this at runtime by querying the driver.
+extern "C" [[gnu::visibility("protected")]] uint64_t
+    [[clang::address_space(4)]] __llvm_libc_clock_freq;
+#define CLOCKS_PER_SEC __llvm_libc_clock_freq
+#endif
 #else
 static long clock() { return 0; }
 #define CLOCKS_PER_SEC 1
@@ -29,10 +40,10 @@ TestLogger &operator<<(TestLogger &logger, Location Loc) {
   return logger << Loc.file << ":" << Loc.line << ": FAILURE\n";
 }
 
-// When the value is UInt128, __uint128_t or wider, show its hexadecimal digits.
+// When the value is UInt128, __uint128_t or wider, show its hexadecimal
+// digits.
 template <typename T>
-cpp::enable_if_t<cpp::is_integral_v<T> && cpp::is_unsigned_v<T> &&
-                     (sizeof(T) > sizeof(uint64_t)),
+cpp::enable_if_t<cpp::is_integral_v<T> && (sizeof(T) > sizeof(uint64_t)),
                  cpp::string>
 describeValue(T Value) {
   static_assert(sizeof(T) % 8 == 0, "Unsupported size of UInt");
@@ -136,14 +147,22 @@ int Test::runTests(const char *TestFilter) {
       break;
     case RunContext::RunResult::Pass:
       tlog << GREEN << "[       OK ] " << RESET << TestName;
-#if __STDC_HOSTED__
+#if __STDC_HOSTED__ || defined(LIBC_TARGET_ARCH_IS_GPU)
       tlog << " (took ";
       if (start_time > end_time) {
         tlog << "unknown - try rerunning)\n";
       } else {
         const auto duration = end_time - start_time;
-        const uint64_t duration_ms = duration * 1000 / CLOCKS_PER_SEC;
-        tlog << duration_ms << " ms)\n";
+        const uint64_t duration_ms = (duration * 1000) / CLOCKS_PER_SEC;
+        const uint64_t duration_us = (duration * 1000 * 1000) / CLOCKS_PER_SEC;
+        const uint64_t duration_ns =
+            (duration * 1000 * 1000 * 1000) / CLOCKS_PER_SEC;
+        if (duration_ms != 0)
+          tlog << duration_ms << " ms)\n";
+        else if (duration_us != 0)
+          tlog << duration_us << " us)\n";
+        else
+          tlog << duration_ns << " ns)\n";
       }
 #else
       tlog << '\n';
@@ -225,6 +244,13 @@ template bool test<__uint128_t>(RunContext *Ctx, TestCond Cond, __uint128_t LHS,
                                 __uint128_t RHS, const char *LHSStr,
                                 const char *RHSStr, Location Loc);
 #endif
+
+template bool test<__llvm_libc::cpp::Int<128>>(RunContext *Ctx, TestCond Cond,
+                                               __llvm_libc::cpp::Int<128> LHS,
+                                               __llvm_libc::cpp::Int<128> RHS,
+                                               const char *LHSStr,
+                                               const char *RHSStr,
+                                               Location Loc);
 
 template bool test<__llvm_libc::cpp::UInt<128>>(RunContext *Ctx, TestCond Cond,
                                                 __llvm_libc::cpp::UInt<128> LHS,

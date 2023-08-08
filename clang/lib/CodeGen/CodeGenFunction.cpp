@@ -577,8 +577,8 @@ CodeGenFunction::getUBSanFunctionTypeHash(QualType Ty) const {
   std::string Mangled;
   llvm::raw_string_ostream Out(Mangled);
   CGM.getCXXABI().getMangleContext().mangleTypeName(Ty, Out, false);
-  return llvm::ConstantInt::get(CGM.Int32Ty,
-                                static_cast<uint32_t>(llvm::xxHash64(Mangled)));
+  return llvm::ConstantInt::get(
+      CGM.Int32Ty, static_cast<uint32_t>(llvm::xxh3_64bits(Mangled)));
 }
 
 void CodeGenFunction::EmitKernelMetadata(const FunctionDecl *FD,
@@ -681,6 +681,19 @@ static bool matchesStlAllocatorFn(const Decl *D, const ASTContext &Ctx) {
   }
 
   return true;
+}
+
+bool CodeGenFunction::isInAllocaArgument(CGCXXABI &ABI, QualType Ty) {
+  const CXXRecordDecl *RD = Ty->getAsCXXRecordDecl();
+  return RD && ABI.getRecordArgABI(RD) == CGCXXABI::RAA_DirectInMemory;
+}
+
+bool CodeGenFunction::hasInAllocaArg(const CXXMethodDecl *MD) {
+  return getTarget().getTriple().getArch() == llvm::Triple::x86 &&
+         getTarget().getCXXABI().isMicrosoft() &&
+         llvm::any_of(MD->parameters(), [&](ParmVarDecl *P) {
+           return isInAllocaArgument(CGM.getCXXABI(), P->getType());
+         });
 }
 
 /// Return the UBSan prologue signature for \p FD if one is available.
@@ -1447,6 +1460,17 @@ void CodeGenFunction::GenerateCode(GlobalDecl GD, llvm::Function *Fn,
     // The lambda static invoker function is special, because it forwards or
     // clones the body of the function call operator (but is actually static).
     EmitLambdaStaticInvokeBody(cast<CXXMethodDecl>(FD));
+  } else if (isa<CXXMethodDecl>(FD) &&
+             isLambdaCallOperator(cast<CXXMethodDecl>(FD)) &&
+             !FnInfo.isDelegateCall() &&
+             cast<CXXMethodDecl>(FD)->getParent()->getLambdaStaticInvoker() &&
+             hasInAllocaArg(cast<CXXMethodDecl>(FD))) {
+    // If emitting a lambda with static invoker on X86 Windows, change
+    // the call operator body.
+    // Make sure that this is a call operator with an inalloca arg and check
+    // for delegate call to make sure this is the original call op and not the
+    // new forwarding function for the static invoker.
+    EmitLambdaInAllocaCallOpBody(cast<CXXMethodDecl>(FD));
   } else if (FD->isDefaulted() && isa<CXXMethodDecl>(FD) &&
              (cast<CXXMethodDecl>(FD)->isCopyAssignmentOperator() ||
               cast<CXXMethodDecl>(FD)->isMoveAssignmentOperator())) {
@@ -1935,8 +1959,7 @@ static void emitNonZeroVLAInit(CodeGenFunction &CGF, QualType baseType,
   llvm::Value *baseSizeInChars
     = llvm::ConstantInt::get(CGF.IntPtrTy, baseSize.getQuantity());
 
-  Address begin =
-    Builder.CreateElementBitCast(dest, CGF.Int8Ty, "vla.begin");
+  Address begin = dest.withElementType(CGF.Int8Ty);
   llvm::Value *end = Builder.CreateInBoundsGEP(
       begin.getElementType(), begin.getPointer(), sizeInChars, "vla.end");
 
@@ -1980,9 +2003,8 @@ CodeGenFunction::EmitNullInitialization(Address DestPtr, QualType Ty) {
     }
   }
 
-  // Cast the dest ptr to the appropriate i8 pointer type.
   if (DestPtr.getElementType() != Int8Ty)
-    DestPtr = Builder.CreateElementBitCast(DestPtr, Int8Ty);
+    DestPtr = DestPtr.withElementType(Int8Ty);
 
   // Get size and alignment info for this aggregate.
   CharUnits size = getContext().getTypeSizeInChars(Ty);
@@ -2027,8 +2049,7 @@ CodeGenFunction::EmitNullInitialization(Address DestPtr, QualType Ty) {
                                NullConstant, Twine());
     CharUnits NullAlign = DestPtr.getAlignment();
     NullVariable->setAlignment(NullAlign.getAsAlign());
-    Address SrcPtr(Builder.CreateBitCast(NullVariable, Builder.getInt8PtrTy()),
-                   Builder.getInt8Ty(), NullAlign);
+    Address SrcPtr(NullVariable, Builder.getInt8Ty(), NullAlign);
 
     if (vla) return emitNonZeroVLAInit(*this, Ty, DestPtr, SrcPtr, SizeVal);
 
@@ -2142,7 +2163,7 @@ llvm::Value *CodeGenFunction::emitArrayLength(const ArrayType *origArrayType,
     }
 
     llvm::Type *baseType = ConvertType(eltType);
-    addr = Builder.CreateElementBitCast(addr, baseType, "array.begin");
+    addr = addr.withElementType(baseType);
   } else {
     // Create the actual GEP.
     addr = Address(Builder.CreateInBoundsGEP(
@@ -2499,7 +2520,7 @@ Address CodeGenFunction::EmitFieldAnnotations(const FieldDecl *D,
   auto *PTy = dyn_cast<llvm::PointerType>(VTy);
   unsigned AS = PTy ? PTy->getAddressSpace() : 0;
   llvm::PointerType *IntrinTy =
-      llvm::PointerType::getWithSamePointeeType(CGM.Int8PtrTy, AS);
+      llvm::PointerType::get(CGM.getLLVMContext(), AS);
   llvm::Function *F = CGM.getIntrinsic(llvm::Intrinsic::ptr_annotation,
                                        {IntrinTy, CGM.ConstGlobalsPtrTy});
 

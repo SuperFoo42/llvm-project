@@ -423,10 +423,9 @@ GVNPass::Expression GVNPass::ValueTable::createGEPExpr(GetElementPtrInst *GEP) {
   unsigned BitWidth = DL.getIndexTypeSizeInBits(PtrTy);
   MapVector<Value *, APInt> VariableOffsets;
   APInt ConstantOffset(BitWidth, 0);
-  if (PtrTy->isOpaquePointerTy() &&
-      GEP->collectOffset(DL, BitWidth, VariableOffsets, ConstantOffset)) {
-    // For opaque pointers, convert into offset representation, to recognize
-    // equivalent address calculations that use different type encoding.
+  if (GEP->collectOffset(DL, BitWidth, VariableOffsets, ConstantOffset)) {
+    // Convert into offset representation, to recognize equivalent address
+    // calculations that use different type encoding.
     LLVMContext &Context = GEP->getContext();
     E.opcode = GEP->getOpcode();
     E.type = nullptr;
@@ -439,8 +438,8 @@ GVNPass::Expression GVNPass::ValueTable::createGEPExpr(GetElementPtrInst *GEP) {
       E.varargs.push_back(
           lookupOrAdd(ConstantInt::get(Context, ConstantOffset)));
   } else {
-    // If converting to offset representation fails (for typed pointers and
-    // scalable vectors), fall back to type-based implementation:
+    // If converting to offset representation fails (for scalable vectors),
+    // fall back to type-based implementation:
     E.opcode = GEP->getOpcode();
     E.type = GEP->getSourceElementType();
     for (Use &Op : GEP->operands())
@@ -721,10 +720,8 @@ void GVNPass::ValueTable::erase(Value *V) {
 /// verifyRemoved - Verify that the value is removed from all internal data
 /// structures.
 void GVNPass::ValueTable::verifyRemoved(const Value *V) const {
-  for (DenseMap<Value*, uint32_t>::const_iterator
-         I = valueNumbering.begin(), E = valueNumbering.end(); I != E; ++I) {
-    assert(I->first != V && "Inst still occurs in value numbering map!");
-  }
+  assert(!valueNumbering.contains(V) &&
+         "Inst still occurs in value numbering map!");
 }
 
 //===----------------------------------------------------------------------===//
@@ -1476,6 +1473,7 @@ void GVNPass::eliminatePartiallyRedundantLoad(
         replaceValuesPerBlockEntry(ValuesPerBlock, OldLoad, NewLoad);
         if (uint32_t ValNo = VN.lookup(OldLoad, false))
           removeFromLeaderTable(ValNo, OldLoad, OldLoad->getParent());
+        VN.erase(OldLoad);
         removeInstruction(OldLoad);
       }
     }
@@ -2000,12 +1998,12 @@ bool GVNPass::processAssumeIntrinsic(AssumeInst *IntrinsicI) {
   if (ConstantInt *Cond = dyn_cast<ConstantInt>(V)) {
     if (Cond->isZero()) {
       Type *Int8Ty = Type::getInt8Ty(V->getContext());
+      Type *PtrTy = PointerType::get(V->getContext(), 0);
       // Insert a new store to null instruction before the load to indicate that
       // this code is not reachable.  FIXME: We could insert unreachable
       // instruction directly because we can modify the CFG.
       auto *NewS = new StoreInst(PoisonValue::get(Int8Ty),
-                                 Constant::getNullValue(Int8Ty->getPointerTo()),
-                                 IntrinsicI);
+                                 Constant::getNullValue(PtrTy), IntrinsicI);
       if (MSSAU) {
         const MemoryUseOrDef *FirstNonDom = nullptr;
         const auto *AL =
@@ -2984,7 +2982,9 @@ bool GVNPass::performScalarPRE(Instruction *CurInst) {
     PREInstr = CurInst->clone();
     if (!performScalarPREInsertion(PREInstr, PREPred, CurrentBlock, ValNo)) {
       // If we failed insertion, make sure we remove the instruction.
-      LLVM_DEBUG(verifyRemoved(PREInstr));
+#ifndef NDEBUG
+      verifyRemoved(PREInstr);
+#endif
       PREInstr->deleteValue();
       return false;
     }
@@ -3123,7 +3123,9 @@ void GVNPass::removeInstruction(Instruction *I) {
   if (MD) MD->removeInstruction(I);
   if (MSSAU)
     MSSAU->removeMemoryAccess(I);
-  LLVM_DEBUG(verifyRemoved(I));
+#ifndef NDEBUG
+  verifyRemoved(I);
+#endif
   ICF->removeInstruction(I);
   I->eraseFromParent();
 }
