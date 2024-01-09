@@ -15,6 +15,8 @@
 #include "test/UnitTest/ErrnoSetterMatcher.h"
 #include "test/UnitTest/Test.h"
 
+#include <sys/stat.h>
+
 TEST(LlvmLibcUniStd, WriteAndReadBackTest) {
   using __llvm_libc::testing::ErrnoSetterMatcher::Succeeds;
   constexpr const char *TEST_FILE = "__unistd_read_write.test";

@@ -131,5 +131,5 @@ class TargetWatchAddressAPITestCase(TestBase):
             self.expect(
                 error.GetCString(),
                 exe=False,
-                substrs=["watch size of %d is not supported" % 365],
+                substrs=["Setting one of the watchpoint resources failed"],
             )

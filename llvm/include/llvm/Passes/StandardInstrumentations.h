@@ -53,7 +53,7 @@ private:
   bool shouldPrintBeforePass(StringRef PassID);
   bool shouldPrintAfterPass(StringRef PassID);
   bool shouldPrintPassNumbers();
-  bool shouldPrintAtPassNumber();
+  bool shouldPrintBeforePassNumber();
 
   using PrintModuleDesc = std::tuple<const Module *, std::string, StringRef>;
 

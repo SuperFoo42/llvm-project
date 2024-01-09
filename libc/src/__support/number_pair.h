@@ -10,13 +10,15 @@
 #define LLVM_LIBC_SRC_SUPPORT_NUMBER_PAIR_H
 
 #include "CPP/type_traits.h"
-#include "named_pair.h"
 
 #include <stddef.h>
 
 namespace __llvm_libc {
 
-DEFINE_NAMED_PAIR_TEMPLATE(NumberPair, lo, hi);
+template <typename T> struct NumberPair {
+  T lo;
+  T hi;
+};
 
 template <typename T>
 cpp::enable_if_t<cpp::is_integral_v<T> && cpp::is_unsigned_v<T>, NumberPair<T>>

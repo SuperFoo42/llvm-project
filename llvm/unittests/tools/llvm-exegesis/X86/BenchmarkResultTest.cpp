@@ -49,6 +49,15 @@ MATCHER(EqMCInst, "") {
   return true;
 }
 
+MATCHER(EqRegValue, "") {
+  const RegisterValue Lhs = get<0>(arg);
+  const RegisterValue Rhs = get<1>(arg);
+  if (Lhs.Register != Rhs.Register || Lhs.Value != Rhs.Value)
+    return false;
+
+  return true;
+}
+
 namespace {
 
 TEST(BenchmarkResultTest, WriteToAndReadFromDisk) {
@@ -123,6 +132,8 @@ TEST(BenchmarkResultTest, WriteToAndReadFromDisk) {
     EXPECT_THAT(FromDisk.Key.Instructions,
                 Pointwise(EqMCInst(), ToDisk.Key.Instructions));
     EXPECT_EQ(FromDisk.Key.Config, ToDisk.Key.Config);
+    EXPECT_THAT(FromDisk.Key.RegisterInitialValues,
+                Pointwise(EqRegValue(), ToDisk.Key.RegisterInitialValues));
     EXPECT_EQ(FromDisk.Mode, ToDisk.Mode);
     EXPECT_EQ(FromDisk.CpuName, ToDisk.CpuName);
     EXPECT_EQ(FromDisk.LLVMTriple, ToDisk.LLVMTriple);
@@ -140,6 +151,8 @@ TEST(BenchmarkResultTest, WriteToAndReadFromDisk) {
     EXPECT_THAT(FromDisk.Key.Instructions,
                 Pointwise(EqMCInst(), ToDisk.Key.Instructions));
     EXPECT_EQ(FromDisk.Key.Config, ToDisk.Key.Config);
+    EXPECT_THAT(FromDisk.Key.RegisterInitialValues,
+                Pointwise(EqRegValue(), ToDisk.Key.RegisterInitialValues));
     EXPECT_EQ(FromDisk.Mode, ToDisk.Mode);
     EXPECT_EQ(FromDisk.CpuName, ToDisk.CpuName);
     EXPECT_EQ(FromDisk.LLVMTriple, ToDisk.LLVMTriple);

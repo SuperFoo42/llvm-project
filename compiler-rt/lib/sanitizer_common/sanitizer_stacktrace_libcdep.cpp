@@ -32,13 +32,14 @@ class StackTraceTextPrinter {
         symbolize_(RenderNeedsSymbolization(stack_trace_fmt)) {}
 
   bool ProcessAddressFrames(uptr pc) {
-    SymbolizedStack *frames = symbolize_
-                                  ? Symbolizer::GetOrInit()->SymbolizePC(pc)
-                                  : SymbolizedStack::New(pc);
+    SymbolizedStackHolder symbolized_stack(
+        symbolize_ ? Symbolizer::GetOrInit()->SymbolizePC(pc)
+                   : SymbolizedStack::New(pc));
+    const SymbolizedStack *frames = symbolized_stack.get();
     if (!frames)
       return false;
 
-    for (SymbolizedStack *cur = frames; cur; cur = cur->next) {
+    for (const SymbolizedStack *cur = frames; cur; cur = cur->next) {
       uptr prev_len = output_->length();
       RenderFrame(output_, stack_trace_fmt_, frame_num_++, cur->info.address,
                   symbolize_ ? &cur->info : nullptr,
@@ -50,13 +51,12 @@ class StackTraceTextPrinter {
 
       ExtendDedupToken(cur);
     }
-    frames->ClearAll();
     return true;
   }
 
  private:
   // Extend the dedup token by appending a new frame.
-  void ExtendDedupToken(SymbolizedStack *stack) {
+  void ExtendDedupToken(const SymbolizedStack *stack) {
     if (!dedup_token_)
       return;
 

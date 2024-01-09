@@ -29,6 +29,8 @@ static bool fnegFoldsIntoMI(const MachineInstr &MI) {
   case AMDGPU::G_FMAXNUM:
   case AMDGPU::G_FMINNUM_IEEE:
   case AMDGPU::G_FMAXNUM_IEEE:
+  case AMDGPU::G_FMINIMUM:
+  case AMDGPU::G_FMAXIMUM:
   case AMDGPU::G_FSIN:
   case AMDGPU::G_FPEXT:
   case AMDGPU::G_INTRINSIC_TRUNC:
@@ -175,6 +177,10 @@ static unsigned inverseMinMax(unsigned Opc) {
     return AMDGPU::G_FMINNUM_IEEE;
   case AMDGPU::G_FMINNUM_IEEE:
     return AMDGPU::G_FMAXNUM_IEEE;
+  case AMDGPU::G_FMAXIMUM:
+    return AMDGPU::G_FMINIMUM;
+  case AMDGPU::G_FMINIMUM:
+    return AMDGPU::G_FMAXIMUM;
   case AMDGPU::G_AMDGPU_FMAX_LEGACY:
     return AMDGPU::G_AMDGPU_FMIN_LEGACY;
   case AMDGPU::G_AMDGPU_FMIN_LEGACY:
@@ -208,6 +214,8 @@ bool AMDGPUCombinerHelper::matchFoldableFneg(MachineInstr &MI,
   case AMDGPU::G_FMAXNUM:
   case AMDGPU::G_FMINNUM_IEEE:
   case AMDGPU::G_FMAXNUM_IEEE:
+  case AMDGPU::G_FMINIMUM:
+  case AMDGPU::G_FMAXIMUM:
   case AMDGPU::G_AMDGPU_FMIN_LEGACY:
   case AMDGPU::G_AMDGPU_FMAX_LEGACY:
     // 0 doesn't have a negated inline immediate.
@@ -305,6 +313,8 @@ void AMDGPUCombinerHelper::applyFoldableFneg(MachineInstr &MI,
   case AMDGPU::G_FMAXNUM:
   case AMDGPU::G_FMINNUM_IEEE:
   case AMDGPU::G_FMAXNUM_IEEE:
+  case AMDGPU::G_FMINIMUM:
+  case AMDGPU::G_FMAXIMUM:
   case AMDGPU::G_AMDGPU_FMIN_LEGACY:
   case AMDGPU::G_AMDGPU_FMAX_LEGACY: {
     NegateOperand(MatchInfo->getOperand(1));

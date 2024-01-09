@@ -42,7 +42,7 @@ public:
   MyAllocator(int i) : id(i) {}
 
   template <class U>
-  MyAllocator(MyAllocator<U> const& other) : id(other.id){};
+  MyAllocator(MyAllocator<U> const& other) : id(other.id) {}
 
   pointer allocate(std::ptrdiff_t n) {
     return pointer(static_cast<T*>(::operator new(n * sizeof(T))));

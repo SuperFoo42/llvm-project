@@ -72,7 +72,7 @@ class ELFObjectWriter;
 struct ELFWriter;
 
 bool isDwoSection(const MCSectionELF &Sec) {
-  return Sec.getName().endswith(".dwo");
+  return Sec.getName().ends_with(".dwo");
 }
 
 class SymbolTableWriter {
@@ -842,7 +842,7 @@ bool ELFWriter::maybeWriteCompression(
     uint32_t ChType, uint64_t Size,
     SmallVectorImpl<uint8_t> &CompressedContents, Align Alignment) {
   uint64_t HdrSize =
-      is64Bit() ? sizeof(ELF::Elf32_Chdr) : sizeof(ELF::Elf64_Chdr);
+      is64Bit() ? sizeof(ELF::Elf64_Chdr) : sizeof(ELF::Elf32_Chdr);
   if (Size <= HdrSize + CompressedContents.size())
     return false;
   // Platform specific header is followed by compressed data.
@@ -871,7 +871,7 @@ void ELFWriter::writeSectionData(const MCAssembler &Asm, MCSection &Sec,
 
   const DebugCompressionType CompressionType = MAI->compressDebugSections();
   if (CompressionType == DebugCompressionType::None ||
-      !SectionName.startswith(".debug_")) {
+      !SectionName.starts_with(".debug_")) {
     Asm.writeSectionData(W.OS, &Section, Layout);
     return;
   }
@@ -1249,7 +1249,7 @@ void ELFObjectWriter::executePostLayoutBinding(MCAssembler &Asm,
     StringRef Prefix = AliasName.substr(0, Pos);
     StringRef Rest = AliasName.substr(Pos);
     StringRef Tail = Rest;
-    if (Rest.startswith("@@@"))
+    if (Rest.starts_with("@@@"))
       Tail = Rest.substr(Symbol.isUndefined() ? 2 : 1);
 
     auto *Alias =
@@ -1267,8 +1267,8 @@ void ELFObjectWriter::executePostLayoutBinding(MCAssembler &Asm,
     if (!Symbol.isUndefined() && S.KeepOriginalSym)
       continue;
 
-    if (Symbol.isUndefined() && Rest.startswith("@@") &&
-        !Rest.startswith("@@@")) {
+    if (Symbol.isUndefined() && Rest.starts_with("@@") &&
+        !Rest.starts_with("@@@")) {
       Asm.getContext().reportError(S.Loc, "default version symbol " +
                                               AliasName + " must be defined");
       continue;
@@ -1286,7 +1286,7 @@ void ELFObjectWriter::executePostLayoutBinding(MCAssembler &Asm,
   for (const MCSymbol *&Sym : AddrsigSyms) {
     if (const MCSymbol *R = Renames.lookup(cast<MCSymbolELF>(Sym)))
       Sym = R;
-    if (Sym->isInSection() && Sym->getName().startswith(".L"))
+    if (Sym->isInSection() && Sym->getName().starts_with(".L"))
       Sym = Sym->getSection().getBeginSymbol();
     Sym->setUsedInReloc();
   }

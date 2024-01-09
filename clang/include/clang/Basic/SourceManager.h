@@ -142,7 +142,7 @@ public:
   ///
   /// FIXME: Make non-optional using a virtual file as needed, remove \c
   /// Filename and use \c OrigEntry.getNameAsRequested() instead.
-  OptionalFileEntryRefDegradesToFileEntryPtr OrigEntry;
+  OptionalFileEntryRef OrigEntry;
 
   /// References the file which the contents were actually loaded from.
   ///
@@ -166,17 +166,21 @@ public:
   ///
   /// When true, the original entry may be a virtual file that does not
   /// exist.
+  LLVM_PREFERRED_TYPE(bool)
   unsigned BufferOverridden : 1;
 
   /// True if this content cache was initially created for a source file
   /// considered to be volatile (likely to change between stat and open).
+  LLVM_PREFERRED_TYPE(bool)
   unsigned IsFileVolatile : 1;
 
   /// True if this file may be transient, that is, if it might not
   /// exist at some later point in time when this content entry is used,
   /// after serialization and deserialization.
+  LLVM_PREFERRED_TYPE(bool)
   unsigned IsTransient : 1;
 
+  LLVM_PREFERRED_TYPE(bool)
   mutable unsigned IsBufferInvalid : 1;
 
   ContentCache()
@@ -304,6 +308,7 @@ class FileInfo {
   unsigned NumCreatedFIDs : 31;
 
   /// Whether this FileInfo has any \#line directives.
+  LLVM_PREFERRED_TYPE(bool)
   unsigned HasLineDirectives : 1;
 
   /// The content cache and the characteristic of the file.
@@ -475,6 +480,7 @@ static_assert(sizeof(FileInfo) <= sizeof(ExpansionInfo),
 class SLocEntry {
   static constexpr int OffsetBits = 8 * sizeof(SourceLocation::UIntTy) - 1;
   SourceLocation::UIntTy Offset : OffsetBits;
+  LLVM_PREFERRED_TYPE(bool)
   SourceLocation::UIntTy IsExpansion : 1;
   union {
     FileInfo File;
@@ -1043,8 +1049,8 @@ public:
 
   /// Returns the FileEntry record for the provided FileID.
   const FileEntry *getFileEntryForID(FileID FID) const {
-    if (auto *Entry = getSLocEntryForFile(FID))
-      return Entry->getFile().getContentCache().OrigEntry;
+    if (auto FE = getFileEntryRefForID(FID))
+      return *FE;
     return nullptr;
   }
 
@@ -1062,9 +1068,11 @@ public:
   std::optional<StringRef> getNonBuiltinFilenameForID(FileID FID) const;
 
   /// Returns the FileEntry record for the provided SLocEntry.
-  const FileEntry *getFileEntryForSLocEntry(const SrcMgr::SLocEntry &sloc) const
-  {
-    return sloc.getFile().getContentCache().OrigEntry;
+  const FileEntry *
+  getFileEntryForSLocEntry(const SrcMgr::SLocEntry &SLocEntry) const {
+    if (auto FE = SLocEntry.getFile().getContentCache().OrigEntry)
+      return *FE;
+    return nullptr;
   }
 
   /// Return a StringRef to the source buffer data for the

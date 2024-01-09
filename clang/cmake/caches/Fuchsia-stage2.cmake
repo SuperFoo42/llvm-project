@@ -76,6 +76,7 @@ if(APPLE)
   set(LIBCXX_ABI_VERSION 2 CACHE STRING "")
   set(LIBCXX_ENABLE_SHARED OFF CACHE BOOL "")
   set(LIBCXX_ENABLE_STATIC_ABI_LIBRARY ON CACHE BOOL "")
+  set(LIBCXX_HARDENING_MODE "none" CACHE STRING "")
   set(LIBCXX_USE_COMPILER_RT ON CACHE BOOL "")
   set(RUNTIMES_CMAKE_ARGS "-DCMAKE_OSX_DEPLOYMENT_TARGET=10.13;-DCMAKE_OSX_ARCHITECTURES=arm64|x86_64" CACHE STRING "")
 endif()
@@ -330,6 +331,7 @@ set(LLVM_TOOLCHAIN_TOOLS
   llvm-symbolizer
   llvm-undname
   llvm-xray
+  opt-viewer
   sancov
   scan-build-py
   CACHE STRING "")
@@ -363,6 +365,7 @@ if(FUCHSIA_ENABLE_LLDB)
     liblldb
     lldb-server
     lldb-argdumper
+    lldb-dap
   )
   if(LLDB_ENABLE_PYTHON)
     list(APPEND _FUCHSIA_LLDB_COMPONENTS lldb-python-scripts)

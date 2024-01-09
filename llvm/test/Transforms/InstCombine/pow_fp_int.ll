@@ -1,4 +1,5 @@
 ; RUN: opt -mtriple unknown -passes=instcombine -S < %s | FileCheck %s
+target datalayout = "e"
 
 ; PR42190
 ; Can't generate test checks due to PR42740.

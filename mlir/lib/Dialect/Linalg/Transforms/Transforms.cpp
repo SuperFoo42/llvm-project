@@ -217,8 +217,7 @@ packLinalgMetadataOnce(SmallVectorImpl<AffineMap> &indexingMaps,
     }
 
     // We can only pack AffineDimExpr atm.
-    if (!map.getResult(maybeOperandDimensionToPack.value())
-             .isa<AffineDimExpr>())
+    if (!isa<AffineDimExpr>(map.getResult(maybeOperandDimensionToPack.value())))
       return failure();
 
     // Add `newDim` to the results of the map.
@@ -422,17 +421,11 @@ FailureOr<LowerUnPackOpResult> linalg::lowerUnPack(RewriterBase &rewriter,
   if (!unPackOp.getOuterDimsPerm().empty())
     return rewriter.notifyMatchFailure(unPackOp, "outer dims perm NYI");
 
-  RankedTensorType packedTensorType = unPackOp.getSourceType();
-  if (!packedTensorType.hasStaticShape()) {
-    return rewriter.notifyMatchFailure(
-        unPackOp,
-        "non-static shape NYI, needs a more powerful tensor.expand_shape op");
-  }
-
   Location loc = unPackOp->getLoc();
   OpBuilder::InsertionGuard g(rewriter);
   rewriter.setInsertionPoint(unPackOp);
 
+  RankedTensorType packedTensorType = unPackOp.getSourceType();
   int64_t packedRank = packedTensorType.getRank();
 
   OpFoldResult zero = rewriter.getIndexAttr(0), one = rewriter.getIndexAttr(1);
@@ -476,8 +469,14 @@ FailureOr<LowerUnPackOpResult> linalg::lowerUnPack(RewriterBase &rewriter,
       RankedTensorType::Builder(packedTensorType).setShape(stripMinedShape);
   RankedTensorType collapsedType = tensor::CollapseShapeOp::inferCollapsedType(
       stripMinedTensorType, packingMetadata.reassociations);
-  auto emptyOp =
-      rewriter.create<tensor::EmptyOp>(loc, stripMinedTensorType, ValueRange{});
+
+  // Get dynamic dims from input tensor based on lastDimsToInsertPositionsPerm
+  // permutation.
+  SmallVector<OpFoldResult, 4> dims =
+      tensor::getMixedSizes(rewriter, loc, unPackOp.getSource());
+  applyPermutationToVector(dims, lastDimsToInsertPositionsPerm);
+  auto emptyOp = rewriter.create<tensor::EmptyOp>(
+      loc, dims, stripMinedTensorType.getElementType());
   auto transposeOp = rewriter.create<linalg::TransposeOp>(
       loc, unPackOp.getSource(), emptyOp, lastDimsToInsertPositionsPerm);
 

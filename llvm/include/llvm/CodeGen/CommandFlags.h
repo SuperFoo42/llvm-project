@@ -86,8 +86,6 @@ bool getDisableTailCalls();
 
 bool getStackSymbolOrdering();
 
-unsigned getOverrideStackAlignment();
-
 bool getStackRealign();
 
 std::string getTrapFuncName();

@@ -1405,7 +1405,7 @@ void Sema::ActOnStartOfLambdaDefinition(LambdaIntroducer &Intro,
       for (const auto &Capture : Intro.Captures) {
         if (Capture.Id == TP->getIdentifier()) {
           Diag(Capture.Loc, diag::err_template_param_shadow) << Capture.Id;
-          Diag(TP->getLocation(), diag::note_template_param_here);
+          NoteTemplateParameterLocation(*TP);
         }
       }
     }
@@ -1846,8 +1846,7 @@ ExprResult Sema::BuildCaptureInit(const Capture &Cap,
   return InitSeq.Perform(*this, Entity, InitKind, InitExpr);
 }
 
-ExprResult Sema::ActOnLambdaExpr(SourceLocation StartLoc, Stmt *Body,
-                                 Scope *CurScope) {
+ExprResult Sema::ActOnLambdaExpr(SourceLocation StartLoc, Stmt *Body) {
   LambdaScopeInfo LSI = *cast<LambdaScopeInfo>(FunctionScopes.back());
   ActOnFinishFunctionBody(LSI.CallOperator, Body);
   return BuildLambdaExpr(StartLoc, Body->getEndLoc(), &LSI);

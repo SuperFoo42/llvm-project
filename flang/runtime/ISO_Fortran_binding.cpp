@@ -72,7 +72,7 @@ int CFI_allocate(CFI_cdesc_t *descriptor, const CFI_index_t lower_bounds[],
     dim->sm = byteSize;
     byteSize *= extent;
   }
-  void *p{std::malloc(byteSize)};
+  void *p{byteSize ? std::malloc(byteSize) : std::malloc(1)};
   if (!p && byteSize) {
     return CFI_ERROR_MEM_ALLOCATION;
   }

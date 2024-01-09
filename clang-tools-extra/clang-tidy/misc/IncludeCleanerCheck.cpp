@@ -120,7 +120,7 @@ void IncludeCleanerCheck::check(const MatchFinder::MatchResult &Result) {
     MainFileDecls.push_back(D);
   }
   llvm::DenseSet<include_cleaner::Symbol> SeenSymbols;
-  const DirectoryEntry *ResourceDir =
+  OptionalDirectoryEntryRef ResourceDir =
       PP->getHeaderSearchInfo().getModuleMap().getBuiltinDir();
   // FIXME: Find a way to have less code duplication between include-cleaner
   // analysis implementation and the below code.
@@ -176,7 +176,7 @@ void IncludeCleanerCheck::check(const MatchFinder::MatchResult &Result) {
       // Since most private -> public mappings happen in a verbatim way, we
       // check textually here. This might go wrong in presence of symlinks or
       // header mappings. But that's not different than rest of the places.
-      if (getCurrentMainFile().endswith(PHeader))
+      if (getCurrentMainFile().ends_with(PHeader))
         continue;
     }
 

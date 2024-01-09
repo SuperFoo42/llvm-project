@@ -131,6 +131,11 @@ else()
   set(LLDB_EXPORT_ALL_SYMBOLS 0)
 endif()
 
+if (CMAKE_SYSTEM_NAME MATCHES "Windows")
+  set(LLDB_EXPORT_ALL_SYMBOLS_PLUGINS "" CACHE STRING
+    "When `LLDB_EXPORT_ALL_SYMBOLS` is enabled, this specifies the plugins whose symbols should be exported.")
+endif()
+
 if ((NOT MSVC) OR MSVC12)
   add_definitions( -DHAVE_ROUND )
 endif()

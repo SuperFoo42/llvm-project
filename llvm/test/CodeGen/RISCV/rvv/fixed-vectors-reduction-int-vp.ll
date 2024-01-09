@@ -853,7 +853,7 @@ define signext i32 @vpreduce_xor_v64i32(i32 signext %s, <64 x i32> %v, <64 x i1>
 ; CHECK-NEXT:  # %bb.1:
 ; CHECK-NEXT:    li a2, 32
 ; CHECK-NEXT:  .LBB49_2:
-; CHECK-NEXT:    vsetivli zero, 1, e32, m1, ta, ma
+; CHECK-NEXT:    vsetvli zero, zero, e32, m2, ta, ma
 ; CHECK-NEXT:    vmv.s.x v25, a0
 ; CHECK-NEXT:    vsetvli zero, a2, e32, m8, ta, ma
 ; CHECK-NEXT:    vredxor.vs v25, v8, v25, v0.t
@@ -1433,7 +1433,7 @@ define i8 @vpreduce_mul_v1i8(i8 %s, <1 x i8> %v, <1 x i1> %m, i32 zeroext %evl) 
 ; RV32-NEXT:    vmerge.vvm v8, v9, v8, v0
 ; RV32-NEXT:    vmv.x.s a0, v8
 ; RV32-NEXT:    mv a1, a2
-; RV32-NEXT:    call __mulsi3@plt
+; RV32-NEXT:    call __mulsi3
 ; RV32-NEXT:    lw ra, 12(sp) # 4-byte Folded Reload
 ; RV32-NEXT:    addi sp, sp, 16
 ; RV32-NEXT:    ret
@@ -1454,7 +1454,7 @@ define i8 @vpreduce_mul_v1i8(i8 %s, <1 x i8> %v, <1 x i1> %m, i32 zeroext %evl) 
 ; RV64-NEXT:    vmerge.vvm v8, v9, v8, v0
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    mv a1, a2
-; RV64-NEXT:    call __muldi3@plt
+; RV64-NEXT:    call __muldi3
 ; RV64-NEXT:    ld ra, 8(sp) # 8-byte Folded Reload
 ; RV64-NEXT:    addi sp, sp, 16
 ; RV64-NEXT:    ret
@@ -1483,7 +1483,7 @@ define signext i8 @vpreduce_mul_v2i8(i8 signext %s, <2 x i8> %v, <2 x i1> %m, i3
 ; RV32-NEXT:    vmul.vv v8, v8, v9
 ; RV32-NEXT:    vmv.x.s a0, v8
 ; RV32-NEXT:    mv a1, a2
-; RV32-NEXT:    call __mulsi3@plt
+; RV32-NEXT:    call __mulsi3
 ; RV32-NEXT:    slli a0, a0, 24
 ; RV32-NEXT:    srai a0, a0, 24
 ; RV32-NEXT:    lw ra, 12(sp) # 4-byte Folded Reload
@@ -1508,7 +1508,7 @@ define signext i8 @vpreduce_mul_v2i8(i8 signext %s, <2 x i8> %v, <2 x i1> %m, i3
 ; RV64-NEXT:    vmul.vv v8, v8, v9
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    mv a1, a2
-; RV64-NEXT:    call __muldi3@plt
+; RV64-NEXT:    call __muldi3
 ; RV64-NEXT:    slli a0, a0, 56
 ; RV64-NEXT:    srai a0, a0, 56
 ; RV64-NEXT:    ld ra, 8(sp) # 8-byte Folded Reload
@@ -1541,7 +1541,7 @@ define signext i8 @vpreduce_mul_v4i8(i8 signext %s, <4 x i8> %v, <4 x i1> %m, i3
 ; RV32-NEXT:    vmul.vv v8, v8, v9
 ; RV32-NEXT:    vmv.x.s a0, v8
 ; RV32-NEXT:    mv a1, a2
-; RV32-NEXT:    call __mulsi3@plt
+; RV32-NEXT:    call __mulsi3
 ; RV32-NEXT:    slli a0, a0, 24
 ; RV32-NEXT:    srai a0, a0, 24
 ; RV32-NEXT:    lw ra, 12(sp) # 4-byte Folded Reload
@@ -1568,7 +1568,7 @@ define signext i8 @vpreduce_mul_v4i8(i8 signext %s, <4 x i8> %v, <4 x i1> %m, i3
 ; RV64-NEXT:    vmul.vv v8, v8, v9
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    mv a1, a2
-; RV64-NEXT:    call __muldi3@plt
+; RV64-NEXT:    call __muldi3
 ; RV64-NEXT:    slli a0, a0, 56
 ; RV64-NEXT:    srai a0, a0, 56
 ; RV64-NEXT:    ld ra, 8(sp) # 8-byte Folded Reload
@@ -1603,7 +1603,7 @@ define signext i8 @vpreduce_mul_v8i8(i8 signext %s, <8 x i8> %v, <8 x i1> %m, i3
 ; RV32-NEXT:    vmul.vv v8, v8, v9
 ; RV32-NEXT:    vmv.x.s a0, v8
 ; RV32-NEXT:    mv a1, a2
-; RV32-NEXT:    call __mulsi3@plt
+; RV32-NEXT:    call __mulsi3
 ; RV32-NEXT:    slli a0, a0, 24
 ; RV32-NEXT:    srai a0, a0, 24
 ; RV32-NEXT:    lw ra, 12(sp) # 4-byte Folded Reload
@@ -1632,7 +1632,7 @@ define signext i8 @vpreduce_mul_v8i8(i8 signext %s, <8 x i8> %v, <8 x i1> %m, i3
 ; RV64-NEXT:    vmul.vv v8, v8, v9
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    mv a1, a2
-; RV64-NEXT:    call __muldi3@plt
+; RV64-NEXT:    call __muldi3
 ; RV64-NEXT:    slli a0, a0, 56
 ; RV64-NEXT:    srai a0, a0, 56
 ; RV64-NEXT:    ld ra, 8(sp) # 8-byte Folded Reload
@@ -1669,7 +1669,7 @@ define signext i8 @vpreduce_mul_v16i8(i8 signext %s, <16 x i8> %v, <16 x i1> %m,
 ; RV32-NEXT:    vmul.vv v8, v8, v9
 ; RV32-NEXT:    vmv.x.s a0, v8
 ; RV32-NEXT:    mv a1, a2
-; RV32-NEXT:    call __mulsi3@plt
+; RV32-NEXT:    call __mulsi3
 ; RV32-NEXT:    slli a0, a0, 24
 ; RV32-NEXT:    srai a0, a0, 24
 ; RV32-NEXT:    lw ra, 12(sp) # 4-byte Folded Reload
@@ -1700,7 +1700,7 @@ define signext i8 @vpreduce_mul_v16i8(i8 signext %s, <16 x i8> %v, <16 x i1> %m,
 ; RV64-NEXT:    vmul.vv v8, v8, v9
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    mv a1, a2
-; RV64-NEXT:    call __muldi3@plt
+; RV64-NEXT:    call __muldi3
 ; RV64-NEXT:    slli a0, a0, 56
 ; RV64-NEXT:    srai a0, a0, 56
 ; RV64-NEXT:    ld ra, 8(sp) # 8-byte Folded Reload
@@ -1740,7 +1740,7 @@ define signext i8 @vpreduce_mul_v32i8(i8 signext %s, <32 x i8> %v, <32 x i1> %m,
 ; RV32-NEXT:    vmul.vv v8, v8, v10
 ; RV32-NEXT:    vmv.x.s a0, v8
 ; RV32-NEXT:    mv a1, a2
-; RV32-NEXT:    call __mulsi3@plt
+; RV32-NEXT:    call __mulsi3
 ; RV32-NEXT:    slli a0, a0, 24
 ; RV32-NEXT:    srai a0, a0, 24
 ; RV32-NEXT:    lw ra, 12(sp) # 4-byte Folded Reload
@@ -1774,7 +1774,7 @@ define signext i8 @vpreduce_mul_v32i8(i8 signext %s, <32 x i8> %v, <32 x i1> %m,
 ; RV64-NEXT:    vmul.vv v8, v8, v10
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    mv a1, a2
-; RV64-NEXT:    call __muldi3@plt
+; RV64-NEXT:    call __muldi3
 ; RV64-NEXT:    slli a0, a0, 56
 ; RV64-NEXT:    srai a0, a0, 56
 ; RV64-NEXT:    ld ra, 8(sp) # 8-byte Folded Reload
@@ -1823,7 +1823,7 @@ define signext i8 @vpreduce_mul_v64i8(i8 signext %s, <64 x i8> %v, <64 x i1> %m,
 ; RV32-NEXT:    vmul.vv v8, v8, v12
 ; RV32-NEXT:    vmv.x.s a0, v8
 ; RV32-NEXT:    mv a1, a2
-; RV32-NEXT:    call __mulsi3@plt
+; RV32-NEXT:    call __mulsi3
 ; RV32-NEXT:    slli a0, a0, 24
 ; RV32-NEXT:    srai a0, a0, 24
 ; RV32-NEXT:    lw ra, 12(sp) # 4-byte Folded Reload
@@ -1866,7 +1866,7 @@ define signext i8 @vpreduce_mul_v64i8(i8 signext %s, <64 x i8> %v, <64 x i1> %m,
 ; RV64-NEXT:    vmul.vv v8, v8, v12
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    mv a1, a2
-; RV64-NEXT:    call __muldi3@plt
+; RV64-NEXT:    call __muldi3
 ; RV64-NEXT:    slli a0, a0, 56
 ; RV64-NEXT:    srai a0, a0, 56
 ; RV64-NEXT:    ld ra, 8(sp) # 8-byte Folded Reload

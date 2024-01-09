@@ -269,7 +269,7 @@ AliasAnalysis::Source AliasAnalysis::getSource(mlir::Value v) {
         attributes.set(Attribute::Pointer);
     }
 
-  if (type == SourceKind::Global)
+  if (type == SourceKind::Global || type == SourceKind::Direct)
     return {global, type, ty, attributes, approximateSource};
 
   return {v, type, ty, attributes, approximateSource};

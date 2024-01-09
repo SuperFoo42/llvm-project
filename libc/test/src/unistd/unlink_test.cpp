@@ -13,6 +13,8 @@
 #include "test/UnitTest/ErrnoSetterMatcher.h"
 #include "test/UnitTest/Test.h"
 
+#include <sys/stat.h>
+
 TEST(LlvmLibcUnlinkTest, CreateAndUnlink) {
   using __llvm_libc::testing::ErrnoSetterMatcher::Succeeds;
   constexpr const char *TEST_FILE = "testdata/unlink.test";

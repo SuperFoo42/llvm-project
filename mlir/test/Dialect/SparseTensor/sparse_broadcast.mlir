@@ -1,4 +1,4 @@
-// RUN: mlir-opt %s --sparsification --canonicalize --cse | FileCheck %s
+// RUN: mlir-opt %s --sparse-reinterpret-map --sparsification --canonicalize --cse | FileCheck %s
 
 #DCSR = #sparse_tensor.encoding<{ lvlTypes = [ "compressed", "compressed" ] }>
 #SparseTensor = #sparse_tensor.encoding<{ lvlTypes = [ "compressed", "compressed", "compressed" ] }>

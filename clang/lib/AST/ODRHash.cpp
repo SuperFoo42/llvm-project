@@ -380,17 +380,17 @@ public:
     Hash.AddBoolean(Method->isThisDeclarationADesignatedInitializer());
     Hash.AddBoolean(Method->hasSkippedBody());
 
-    ID.AddInteger(Method->getImplementationControl());
+    ID.AddInteger(llvm::to_underlying(Method->getImplementationControl()));
     ID.AddInteger(Method->getMethodFamily());
     ImplicitParamDecl *Cmd = Method->getCmdDecl();
     Hash.AddBoolean(Cmd);
     if (Cmd)
-      ID.AddInteger(Cmd->getParameterKind());
+      ID.AddInteger(llvm::to_underlying(Cmd->getParameterKind()));
 
     ImplicitParamDecl *Self = Method->getSelfDecl();
     Hash.AddBoolean(Self);
     if (Self)
-      ID.AddInteger(Self->getParameterKind());
+      ID.AddInteger(llvm::to_underlying(Self->getParameterKind()));
 
     AddDecl(Method);
 
@@ -927,7 +927,7 @@ public:
 
   void VisitArrayType(const ArrayType *T) {
     AddQualType(T->getElementType());
-    ID.AddInteger(T->getSizeModifier());
+    ID.AddInteger(llvm::to_underlying(T->getSizeModifier()));
     VisitQualifiers(T->getIndexTypeQualifiers());
     VisitType(T);
   }
@@ -1177,7 +1177,7 @@ public:
   }
 
   void VisitTypeWithKeyword(const TypeWithKeyword *T) {
-    ID.AddInteger(T->getKeyword());
+    ID.AddInteger(llvm::to_underlying(T->getKeyword()));
     VisitType(T);
   };
 
@@ -1218,7 +1218,7 @@ public:
   void VisitVectorType(const VectorType *T) {
     AddQualType(T->getElementType());
     ID.AddInteger(T->getNumElements());
-    ID.AddInteger(T->getVectorKind());
+    ID.AddInteger(llvm::to_underlying(T->getVectorKind()));
     VisitType(T);
   }
 

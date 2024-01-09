@@ -193,7 +193,7 @@ static Instruction *cloneInstructionInExitBlock(
 static void eraseInstruction(Instruction &I, ICFLoopSafetyInfo &SafetyInfo,
                              MemorySSAUpdater &MSSAU);
 
-static void moveInstructionBefore(Instruction &I, Instruction &Dest,
+static void moveInstructionBefore(Instruction &I, BasicBlock::iterator Dest,
                                   ICFLoopSafetyInfo &SafetyInfo,
                                   MemorySSAUpdater &MSSAU, ScalarEvolution *SE);
 
@@ -481,12 +481,12 @@ bool LoopInvariantCodeMotion::runOnLoop(Loop *L, AAResults *AA, LoopInfo *LI,
     });
 
     if (!HasCatchSwitch) {
-      SmallVector<Instruction *, 8> InsertPts;
+      SmallVector<BasicBlock::iterator, 8> InsertPts;
       SmallVector<MemoryAccess *, 8> MSSAInsertPts;
       InsertPts.reserve(ExitBlocks.size());
       MSSAInsertPts.reserve(ExitBlocks.size());
       for (BasicBlock *ExitBlock : ExitBlocks) {
-        InsertPts.push_back(&*ExitBlock->getFirstInsertionPt());
+        InsertPts.push_back(ExitBlock->getFirstInsertionPt());
         MSSAInsertPts.push_back(nullptr);
       }
 
@@ -1011,7 +1011,8 @@ bool llvm::hoistRegion(DomTreeNode *N, AAResults *AA, LoopInfo *LI,
         LLVM_DEBUG(dbgs() << "LICM rehoisting to "
                           << HoistPoint->getParent()->getNameOrAsOperand()
                           << ": " << *I << "\n");
-        moveInstructionBefore(*I, *HoistPoint, *SafetyInfo, MSSAU, SE);
+        moveInstructionBefore(*I, HoistPoint->getIterator(), *SafetyInfo, MSSAU,
+                              SE);
         HoistPoint = I;
         Changed = true;
       }
@@ -1506,16 +1507,17 @@ static void eraseInstruction(Instruction &I, ICFLoopSafetyInfo &SafetyInfo,
   I.eraseFromParent();
 }
 
-static void moveInstructionBefore(Instruction &I, Instruction &Dest,
+static void moveInstructionBefore(Instruction &I, BasicBlock::iterator Dest,
                                   ICFLoopSafetyInfo &SafetyInfo,
                                   MemorySSAUpdater &MSSAU,
                                   ScalarEvolution *SE) {
   SafetyInfo.removeInstruction(&I);
-  SafetyInfo.insertInstructionTo(&I, Dest.getParent());
-  I.moveBefore(&Dest);
+  SafetyInfo.insertInstructionTo(&I, Dest->getParent());
+  I.moveBefore(*Dest->getParent(), Dest);
   if (MemoryUseOrDef *OldMemAcc = cast_or_null<MemoryUseOrDef>(
           MSSAU.getMemorySSA()->getMemoryAccess(&I)))
-    MSSAU.moveToPlace(OldMemAcc, Dest.getParent(), MemorySSA::BeforeTerminator);
+    MSSAU.moveToPlace(OldMemAcc, Dest->getParent(),
+                      MemorySSA::BeforeTerminator);
   if (SE)
     SE->forgetBlockAndLoopDispositions(&I);
 }
@@ -1762,10 +1764,11 @@ static void hoist(Instruction &I, const DominatorTree *DT, const Loop *CurLoop,
 
   if (isa<PHINode>(I))
     // Move the new node to the end of the phi list in the destination block.
-    moveInstructionBefore(I, *Dest->getFirstNonPHI(), *SafetyInfo, MSSAU, SE);
+    moveInstructionBefore(I, Dest->getFirstNonPHIIt(), *SafetyInfo, MSSAU, SE);
   else
     // Move the new node to the destination block, before its terminator.
-    moveInstructionBefore(I, *Dest->getTerminator(), *SafetyInfo, MSSAU, SE);
+    moveInstructionBefore(I, Dest->getTerminator()->getIterator(), *SafetyInfo,
+                          MSSAU, SE);
 
   I.updateLocationAfterHoist();
 
@@ -1809,7 +1812,7 @@ namespace {
 class LoopPromoter : public LoadAndStorePromoter {
   Value *SomePtr; // Designated pointer to store to.
   SmallVectorImpl<BasicBlock *> &LoopExitBlocks;
-  SmallVectorImpl<Instruction *> &LoopInsertPts;
+  SmallVectorImpl<BasicBlock::iterator> &LoopInsertPts;
   SmallVectorImpl<MemoryAccess *> &MSSAInsertPts;
   PredIteratorCache &PredCache;
   MemorySSAUpdater &MSSAU;
@@ -1843,7 +1846,7 @@ class LoopPromoter : public LoadAndStorePromoter {
 public:
   LoopPromoter(Value *SP, ArrayRef<const Instruction *> Insts, SSAUpdater &S,
                SmallVectorImpl<BasicBlock *> &LEB,
-               SmallVectorImpl<Instruction *> &LIP,
+               SmallVectorImpl<BasicBlock::iterator> &LIP,
                SmallVectorImpl<MemoryAccess *> &MSSAIP, PredIteratorCache &PIC,
                MemorySSAUpdater &MSSAU, LoopInfo &li, DebugLoc dl,
                Align Alignment, bool UnorderedAtomic, const AAMDNodes &AATags,
@@ -1866,7 +1869,7 @@ public:
       Value *LiveInValue = SSA.GetValueInMiddleOfBlock(ExitBlock);
       LiveInValue = maybeInsertLCSSAPHI(LiveInValue, ExitBlock);
       Value *Ptr = maybeInsertLCSSAPHI(SomePtr, ExitBlock);
-      Instruction *InsertPos = LoopInsertPts[i];
+      BasicBlock::iterator InsertPos = LoopInsertPts[i];
       StoreInst *NewSI = new StoreInst(LiveInValue, Ptr, InsertPos);
       if (UnorderedAtomic)
         NewSI->setOrdering(AtomicOrdering::Unordered);
@@ -1964,7 +1967,7 @@ bool isThreadLocalObject(const Value *Object, const Loop *L, DominatorTree *DT,
 bool llvm::promoteLoopAccessesToScalars(
     const SmallSetVector<Value *, 8> &PointerMustAliases,
     SmallVectorImpl<BasicBlock *> &ExitBlocks,
-    SmallVectorImpl<Instruction *> &InsertPts,
+    SmallVectorImpl<BasicBlock::iterator> &InsertPts,
     SmallVectorImpl<MemoryAccess *> &MSSAInsertPts, PredIteratorCache &PIC,
     LoopInfo *LI, DominatorTree *DT, AssumptionCache *AC,
     const TargetLibraryInfo *TLI, TargetTransformInfo *TTI, Loop *CurLoop,
@@ -2186,7 +2189,10 @@ bool llvm::promoteLoopAccessesToScalars(
   // violating the memory model.
   if (StoreSafety == StoreSafetyUnknown) {
     Value *Object = getUnderlyingObject(SomePtr);
-    if (isWritableObject(Object) &&
+    bool ExplicitlyDereferenceableOnly;
+    if (isWritableObject(Object, ExplicitlyDereferenceableOnly) &&
+        (!ExplicitlyDereferenceableOnly ||
+         isDereferenceablePointer(SomePtr, AccessTy, MDL)) &&
         isThreadLocalObject(Object, CurLoop, DT, TTI))
       StoreSafety = StoreSafe;
   }
@@ -2505,7 +2511,7 @@ static bool hoistGEP(Instruction &I, Loop &L, ICFLoopSafetyInfo &SafetyInfo,
   // handle both offsets being non-negative.
   const DataLayout &DL = GEP->getModule()->getDataLayout();
   auto NonNegative = [&](Value *V) {
-    return isKnownNonNegative(V, DL, 0, AC, GEP, DT);
+    return isKnownNonNegative(V, SimplifyQuery(DL, DT, AC, GEP));
   };
   bool IsInBounds = Src->isInBounds() && GEP->isInBounds() &&
                     all_of(Src->indices(), NonNegative) &&

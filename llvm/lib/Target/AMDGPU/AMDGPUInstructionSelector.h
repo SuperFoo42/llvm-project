@@ -148,6 +148,9 @@ private:
   bool selectSMFMACIntrin(MachineInstr &I) const;
   bool selectWaveAddress(MachineInstr &I) const;
   bool selectStackRestore(MachineInstr &MI) const;
+  bool selectNamedBarrierInst(MachineInstr &I, Intrinsic::ID IID) const;
+  bool selectSBarrierSignalIsfirst(MachineInstr &I, Intrinsic::ID IID) const;
+  bool selectSBarrierLeave(MachineInstr &I) const;
 
   std::pair<Register, unsigned> selectVOP3ModsImpl(MachineOperand &Root,
                                                    bool IsCanonicalizing = true,
@@ -242,8 +245,9 @@ private:
   bool isDSOffsetLegal(Register Base, int64_t Offset) const;
   bool isDSOffset2Legal(Register Base, int64_t Offset0, int64_t Offset1,
                         unsigned Size) const;
-  bool isFlatScratchBaseLegal(
-      Register Base, uint64_t FlatVariant = SIInstrFlags::FlatScratch) const;
+  bool isFlatScratchBaseLegal(Register Addr) const;
+  bool isFlatScratchBaseLegalSV(Register Addr) const;
+  bool isFlatScratchBaseLegalSVImm(Register Addr) const;
 
   std::pair<Register, unsigned>
   selectDS1Addr1OffsetImpl(MachineOperand &Root) const;
@@ -286,6 +290,9 @@ private:
 
   bool selectMUBUFOffsetImpl(MachineOperand &Root, Register &RSrcReg,
                              Register &SOffset, int64_t &Offset) const;
+
+  InstructionSelector::ComplexRendererFns
+  selectBUFSOffset(MachineOperand &Root) const;
 
   InstructionSelector::ComplexRendererFns
   selectMUBUFAddr64(MachineOperand &Root) const;

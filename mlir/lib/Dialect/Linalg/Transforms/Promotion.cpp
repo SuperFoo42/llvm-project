@@ -48,7 +48,8 @@ static Value allocBuffer(ImplicitLocOpBuilder &b,
                          const LinalgPromotionOptions &options,
                          Type elementType, Value allocSize, DataLayout &layout,
                          std::optional<unsigned> alignment = std::nullopt) {
-  auto width = layout.getTypeSize(elementType);
+  llvm::TypeSize width = layout.getTypeSize(elementType);
+  assert(!width.isScalable() && "cannot allocate buffer for a scalable vector");
 
   IntegerAttr alignmentAttr;
   if (alignment.has_value())
@@ -60,8 +61,8 @@ static Value allocBuffer(ImplicitLocOpBuilder &b,
 
   // Static buffer.
   if (std::optional<int64_t> cst = getConstantIntValue(allocSize)) {
-    auto staticBufferType =
-        MemRefType::get(width * cst.value(), b.getIntegerType(8));
+    auto staticBufferType = MemRefType::get(width.getFixedValue() * cst.value(),
+                                            b.getIntegerType(8));
     staticBufferType =
         MemRefType::Builder(staticBufferType).setMemorySpace(memorySpaceAttr);
     if (options.useAlloca) {
@@ -201,7 +202,7 @@ LinalgOpInstancePromotionOptions::LinalgOpInstancePromotionOptions(
   Location loc = linalgOp.getLoc();
   auto defaultCopyCallBack = [loc](OpBuilder &b, Value src,
                                    Value dst) -> LogicalResult {
-    b.create<memref::CopyOp>(loc, src, dst);
+    b.create<linalg::CopyOp>(loc, src, dst);
     return success();
   };
   copyInFn = (options.copyInFn ? *(options.copyInFn) : defaultCopyCallBack);

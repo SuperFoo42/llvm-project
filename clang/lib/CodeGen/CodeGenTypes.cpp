@@ -419,7 +419,7 @@ llvm::Type *CodeGenTypes::ConvertType(QualType T) {
 
     case BuiltinType::NullPtr:
       // Model std::nullptr_t as i8*
-      ResultType = llvm::Type::getInt8PtrTy(getLLVMContext());
+      ResultType = llvm::PointerType::getUnqual(getLLVMContext());
       break;
 
     case BuiltinType::UInt128:
