@@ -5,10 +5,14 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 #
 # ===----------------------------------------------------------------------===##
+import sys
+import re
+import shlex
+from pathlib import Path
 
 from libcxx.test.dsl import *
-from libcxx.test.features import _isMSVC
-import re
+from libcxx.test.features import _isClang, _isAppleClang, _isGCC, _isMSVC
+
 
 _warningFlags = [
     "-Werror",
@@ -73,9 +77,6 @@ _allStandards = ["c++03", "c++11", "c++14", "c++17", "c++20", "c++23", "c++26"]
 
 
 def getStdFlag(cfg, std):
-    # TODO(LLVM-17) Remove this clang-tidy-16 work-around
-    if std == "c++23":
-        std = "c++2b"
     if hasCompileFlag(cfg, "-std=" + std):
         return "-std=" + std
     # TODO(LLVM-19) Remove the fallbacks needed for Clang 16.
@@ -87,13 +88,26 @@ def getStdFlag(cfg, std):
     return None
 
 
-_allModules = ["none", "clang"]
+def getSpeedOptimizationFlag(cfg):
+    if _isClang(cfg) or _isAppleClang(cfg) or _isGCC(cfg):
+        return "-O3"
+    elif _isMSVC(cfg):
+        return "/O2"
+    else:
+        raise RuntimeError(
+            "Can't figure out what compiler is used in the configuration"
+        )
 
 
-def getModuleFlag(cfg, enable_modules):
-    if enable_modules in _allModules:
-        return enable_modules
-    return None
+def getSizeOptimizationFlag(cfg):
+    if _isClang(cfg) or _isAppleClang(cfg) or _isGCC(cfg):
+        return "-Os"
+    elif _isMSVC(cfg):
+        return "/O1"
+    else:
+        raise RuntimeError(
+            "Can't figure out what compiler is used in the configuration"
+        )
 
 
 # fmt: off
@@ -127,33 +141,38 @@ DEFAULT_PARAMETERS = [
         ],
     ),
     Parameter(
-        name="enable_modules",
-        choices=_allModules,
+        name="optimization",
+        choices=["none", "speed", "size"],
         type=str,
-        help="Whether to build the test suite with modules enabled. Select "
-        "`clang` for Clang modules",
-        default=lambda cfg: next(s for s in _allModules if getModuleFlag(cfg, s)),
-        actions=lambda enable_modules: [
-            AddFeature("clang-modules-build"),
-            AddCompileFlag("-fmodules"),
-            AddCompileFlag("-fcxx-modules"), # AppleClang disregards -fmodules entirely when compiling C++. This enables modules for C++.
+        help="The optimization level to use when compiling the test suite.",
+        default="none",
+        actions=lambda opt: filter(None, [
+            AddCompileFlag(lambda cfg: getSpeedOptimizationFlag(cfg)) if opt == "speed" else None,
+            AddCompileFlag(lambda cfg: getSizeOptimizationFlag(cfg)) if opt == "size" else None,
+            AddFeature(f'optimization={opt}'),
+        ]),
+    ),
+    Parameter(
+        name="enable_modules",
+        choices=["none", "clang", "clang-lsv"],
+        type=str,
+        help="Whether to build the test suite with modules enabled. "
+             "Select `clang` for Clang modules, and 'clang-lsv' for Clang modules with Local Submodule Visibility.",
+        default="none",
+        actions=lambda modules: filter(None, [
+            AddFeature("clang-modules-build")           if modules in ("clang", "clang-lsv") else None,
+
+            # Note: AppleClang disregards -fmodules entirely when compiling C++, so we also pass -fcxx-modules
+            #       to enable modules for C++.
+            AddCompileFlag("-fmodules -fcxx-modules")   if modules in ("clang", "clang-lsv") else None,
+
             # Note: We use a custom modules cache path to make sure that we don't reuse
             #       the default one, which can be shared across CI builds with different
             #       configurations.
-            AddCompileFlag(lambda cfg: f"-fmodules-cache-path={cfg.test_exec_root}/ModuleCache"),
-        ]
-        if enable_modules == "clang"
-        else [],
-    ),
-    Parameter(
-        name="enable_modules_lsv",
-        choices=[True, False],
-        type=bool,
-        default=False,
-        help="Whether to enable Local Submodule Visibility in the Modules build.",
-        actions=lambda lsv: [] if not lsv else [
-            AddCompileFlag("-Xclang -fmodules-local-submodule-visibility"),
-        ],
+            AddCompileFlag(lambda cfg: f"-fmodules-cache-path={cfg.test_exec_root}/ModuleCache") if modules in ("clang", "clang-lsv") else None,
+
+            AddCompileFlag("-Xclang -fmodules-local-submodule-visibility") if modules == "clang-lsv" else None,
+        ])
     ),
     Parameter(
         name="enable_exceptions",
@@ -294,6 +313,14 @@ DEFAULT_PARAMETERS = [
         actions=lambda enabled: [] if not enabled else [AddFeature("long_tests")],
     ),
     Parameter(
+        name="large_tests",
+        choices=[True, False],
+        type=bool,
+        default=True,
+        help="Whether to enable tests that use a lot of memory. This can be useful when running on a device with limited amounts of memory.",
+        actions=lambda enabled: [] if not enabled else [AddFeature("large_tests")],
+    ),
+    Parameter(
         name="hardening_mode",
         choices=["none", "fast", "extensive", "debug"],
         type=str,
@@ -333,5 +360,12 @@ DEFAULT_PARAMETERS = [
             AddCompileFlag("-D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES"),
         ],
     ),
+    Parameter(
+        name="executor",
+        type=str,
+        default=f"{shlex.quote(sys.executable)} {shlex.quote(str(Path(__file__).resolve().parent.parent.parent / 'run.py'))}",
+        help="Custom executor to use instead of the configured default.",
+        actions=lambda executor: [AddSubstitution("%{executor}", executor)],
+    )
 ]
 # fmt: on

@@ -1419,6 +1419,9 @@ public:
   /// (C++11 [class]p6).
   bool isTriviallyCopyable() const;
 
+  /// Determine whether this class is considered trivially copyable per
+  bool isTriviallyCopyConstructible() const;
+
   /// Determine whether this class is considered trivial.
   ///
   /// C++11 [class]p6:

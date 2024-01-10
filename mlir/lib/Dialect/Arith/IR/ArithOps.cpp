@@ -61,6 +61,11 @@ static IntegerAttr mulIntegerAttrs(PatternRewriter &builder, Value res,
                              std::multiplies<int64_t>());
 }
 
+static IntegerOverflowFlagsAttr getDefOverflowFlags(OpBuilder &builder) {
+  return IntegerOverflowFlagsAttr::get(builder.getContext(),
+                                       IntegerOverflowFlags::none);
+}
+
 /// Invert an integer comparison predicate.
 arith::CmpIPredicate arith::invertPredicate(arith::CmpIPredicate pred) {
   switch (pred) {
